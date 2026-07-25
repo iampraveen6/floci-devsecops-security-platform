@@ -92,6 +92,7 @@ jobs:
           aws-access-key-id: test
           aws-secret-access-key: test
           aws-region: us-east-1
+          sts-endpoint: http://localhost:4566
 
       - name: Terraform Init
         run: terraform init

@@ -41,7 +41,18 @@ resource "aws_s3_bucket" "audit_bucket" {
 }
 
 resource "aws_s3_bucket" "log_bucket" {
+  # checkov:skip=CKV2_AWS_62:Event notifications are not required for this local-only, non-critical bucket.
+  # checkov:skip=CKV_AWS_144:Cross-region replication is not required for this local-only, non-critical bucket.
+  # checkov:skip=CKV2_AWS_61:A lifecycle policy is not required for this local-only, non-critical bucket.
+  # checkov:skip=CKV_AWS_145:SSE-S3 (AES256) is used intentionally as SSE-KMS is not supported for S3 logging targets.
   bucket = "floci-devsecops-access-logs"
+}
+
+resource "aws_s3_bucket_versioning" "log_bucket_versioning" {
+  bucket = aws_s3_bucket.log_bucket.id
+  versioning_configuration {
+    status = "Enabled"
+  }
 }
 
 resource "aws_s3_bucket_public_access_block" "log_bucket_pab" {

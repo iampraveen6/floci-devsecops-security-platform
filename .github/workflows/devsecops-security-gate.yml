@@ -20,11 +20,8 @@ jobs:
       # 1. Gitleaks Secret Detection
       - name: Run Gitleaks secret detection
         uses: gitleaks/gitleaks-action@v2
-        with:
-          # By default, Gitleaks fails the build if secrets are found.
-          # The report will be uploaded as an artifact.
-          report_format: json
-          report_path: gitleaks-report.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # 2. Trivy Vulnerability Scanner (Filesystem Scan)
       - name: Run Trivy vulnerability scanner in IaC mode

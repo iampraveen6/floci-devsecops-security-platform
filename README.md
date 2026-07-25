@@ -75,3 +75,4 @@ This script will:
 2. Audit S3 buckets for public access blocks.
 3. Check IAM permissions for secret retrieval.
 4. Output a compliance report to the console.
+# A test change to trigger the workflow

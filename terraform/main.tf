@@ -53,6 +53,7 @@ resource "aws_s3_bucket_public_access_block" "log_bucket_pab" {
 }
 
 resource "aws_s3_bucket_server_side_encryption_configuration" "log_bucket_sse" {
+  # trivy:ignore:AWS-0132 SSE-S3 (AES256) is used intentionally as SSE-KMS is not supported for S3 logging targets.
   bucket = aws_s3_bucket.log_bucket.id
 
   rule {

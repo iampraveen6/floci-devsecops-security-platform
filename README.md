@@ -1,5 +1,7 @@
 # floci-devsecops-security-platform
 
+[![DevSecOps Security Gate](https://github.com/iampraveen6/floci-devsecops-security-platform/actions/workflows/devsecops-security-gate.yml/badge.svg)](https://github.com/iampraveen6/floci-devsecops-security-platform/actions/workflows/devsecops-security-gate.yml)
+
 A production-ready GitHub repository for DevSecOps, Application Security, Supply Chain Security, and Policy-as-Code, using the Floci AWS Local Skill baseline.
 
 ## DevSecOps Architecture Overview

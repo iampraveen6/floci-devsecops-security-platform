@@ -26,9 +26,29 @@ resource "aws_kms_key" "devsecops_key" {
 }
 
 # 2. S3 Audit Bucket with Object Lock and Default-Deny Policy
+# Note: CKV_AWS_144, CKV2_AWS_61, CKV2_AWS_62 are skipped as replication, lifecycle, and event notifications are not critical for this local-only audit bucket.
 resource "aws_s3_bucket" "audit_bucket" {
   # Bucket names must be unique. Add a random suffix for local testing.
   bucket = "floci-devsecops-audit-logs"
+
+  # CKV_AWS_18: Ensure the S3 bucket has access logging enabled
+  # CKV_AWS_144: Ensure that S3 bucket has cross-region replication enabled
+  # CKV2_AWS_61: Ensure that an S3 bucket has a lifecycle configuration
+  # CKV2_AWS_62: Ensure S3 buckets should have event notifications enabled
+  # checkov:skip=CKV_AWS_144:Cross-region replication is not required for this local-only, non-critical bucket.
+  # checkov:skip=CKV2_AWS_61:A lifecycle policy is not required for this local-only, non-critical bucket.
+  # checkov:skip=CKV2_AWS_62:Event notifications are not required for this local-only, non-critical bucket.
+}
+
+resource "aws_s3_bucket" "log_bucket" {
+  bucket = "floci-devsecops-access-logs"
+}
+
+resource "aws_s3_bucket_logging" "audit_bucket_logging" {
+  bucket = aws_s3_bucket.audit_bucket.id
+
+  target_bucket = aws_s3_bucket.log_bucket.id
+  target_prefix = "log/"
 }
 
 resource "aws_s3_bucket_versioning" "audit_bucket_versioning" {
@@ -107,6 +127,8 @@ resource "aws_s3_bucket_policy" "audit_bucket_policy" {
 
 # 3. AWS Secrets Manager Secret with Automated KMS Encryption
 resource "aws_secretsmanager_secret" "database_credentials" {
+  # CKV2_AWS_57: Ensure Secrets Manager secrets should have automatic rotation enabled
+  # checkov:skip=CKV2_AWS_57:Automatic rotation requires a Lambda function, which is out of scope for this IaC-focused example.
   name       = "dev/database/credentials"
   kms_key_id = aws_kms_key.devsecops_key.id
 

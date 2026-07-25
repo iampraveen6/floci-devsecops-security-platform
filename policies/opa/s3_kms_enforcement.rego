@@ -3,7 +3,7 @@
 package terraform.analysis
 
 # Deny if an S3 bucket does not have server-side encryption configured with KMS.
-deny[msg] {
+deny[msg] if {
     # Find all S3 bucket resources
     resource := input.resource.aws_s3_bucket[_]
 
@@ -15,7 +15,7 @@ deny[msg] {
 }
 
 # Deny if the server-side encryption configuration does not use 'aws:kms'.
-deny[msg] {
+deny[msg] if {
     # Find all S3 bucket resources with SSE configuration
     resource := input.resource.aws_s3_bucket[_]
     sse_config := resource.server_side_encryption_configuration[_]
@@ -28,7 +28,7 @@ deny[msg] {
 }
 
 # Deny if the KMS key ID is missing from the encryption configuration.
-deny[msg] {
+deny[msg] if {
     # Find all S3 bucket resources with SSE configuration
     resource := input.resource.aws_s3_bucket[_]
     sse_config := resource.server_side_encryption_configuration[_]

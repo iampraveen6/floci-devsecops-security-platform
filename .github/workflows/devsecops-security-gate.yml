@@ -16,6 +16,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch all history for Gitleaks to diff
 
       # 1. Gitleaks Secret Detection
       - name: Run Gitleaks secret detection
@@ -80,6 +82,8 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch all history for Gitleaks to diff
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3

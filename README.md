@@ -54,27 +54,72 @@ The following diagram illustrates the security gates integrated into the CI/CD p
 +-----------------+      +----------------------+      +-------------------------+
 ```
 
-## Local AWS CLI Security Audit Commands
+## Local Development & Audit
 
-To run a local security audit against the Floci environment, use the provided script. This script leverages the AWS CLI configured to target the local Floci endpoint.
+This section provides a complete guide to setting up your local environment to run the security audit against a local Floci instance. These steps replicate the environment used in the GitHub Actions CI pipeline.
 
-**Prerequisites**:
-- AWS CLI installed and configured.
-- Floci container running (`docker run -d -p 4566:4566 floci/floci:latest`).
+### Prerequisites
 
-**Execution**:
+Ensure the following tools are installed on your system (WSL is recommended on Windows):
 
-```bash
-# Make the script executable
-chmod +x scripts/floci-security-audit.sh
+1.  **Docker**: To run the Floci container.
+2.  **AWS CLI v2**: For interacting with the local AWS environment.
+3.  **jq**: A command-line JSON processor used by the audit script.
+4.  **Terraform**: To deploy the IaC resources to the local Floci environment.
 
-# Run the audit
-./scripts/floci-security-audit.sh
-```
+### Step-by-Step Guide
 
-This script will:
-1. Verify the status of the customer-managed KMS key.
-2. Audit S3 buckets for public access blocks.
-3. Check IAM permissions for secret retrieval.
-4. Output a compliance report to the console.
-# A test change to trigger the workflow
+1.  **Start the Floci Container**:
+
+    Open a terminal and run the following command to start the Floci container in the background. This simulates the AWS environment locally.
+
+    ```bash
+    docker run --rm -d -v /var/run/docker.sock:/var/run/docker.sock -p 4566:4566 -p 4510-4559:4510-4559 --name floci floci/floci:latest
+    ```
+
+2.  **Deploy Terraform Resources**:
+
+    Navigate to the `terraform` directory and deploy the AWS resources to the running Floci container.
+
+    ```bash
+    cd terraform
+    terraform init
+    terraform apply -auto-approve
+    cd ..
+    ```
+
+3.  **Run the Security Audit Script**:
+
+    Execute the audit script from the root of the repository. This script checks if the deployed resources comply with the defined security policies.
+
+    ```bash
+    # Make the script executable (if you haven't already)
+    chmod +x scripts/floci-security-audit.sh
+
+    # Run the audit
+    ./scripts/floci-security-audit.sh
+    ```
+
+4.  **Review the Output**:
+
+    The script will output a compliance report to the console. A successful audit will show `[PASS]` for all checks:
+
+    ```text
+    =================================================
+       Floci Local Security Compliance Audit Report
+    =================================================
+
+    1. Verifying KMS Key Status...
+       [PASS] KMS Key (...) is enabled.
+       [PASS] KMS Key rotation is enabled.
+
+    2. Auditing S3 Bucket Public Access Blocks...
+       [PASS] S3 bucket 'floci-devsecops-audit-logs' has all public access blocks enabled.
+
+    3. Checking IAM Policy for Secret Retrieval...
+       [PASS] IAM policy 'SecretReaderPolicy' correctly grants GetSecretValue to the specific secret.
+
+    =================================================
+                   Audit Report Complete
+    =================================================
+    ```

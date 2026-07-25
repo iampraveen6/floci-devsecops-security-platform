@@ -76,8 +76,6 @@ jobs:
         image: floci/floci:latest
         ports:
           - 4566:4566
-        # Healthcheck to ensure Floci is ready before tests run
-        options: --health-cmd="awslocal s3 ls" --health-interval=10s --health-timeout=5s --health-retries=5
 
     steps:
       - name: Checkout code

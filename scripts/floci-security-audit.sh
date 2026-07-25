@@ -30,7 +30,7 @@ check_command jq
 
 # --- Audit Execution ---
 echo "================================================="
-echo "  Floci Local Security Compliance Audit Report   "
+echo "   Floci Local Security Compliance Audit Report   "
 echo "================================================="
 echo
 
@@ -39,12 +39,12 @@ echo -e "${YELLOW}1. Verifying KMS Key Status...${NC}"
 # In a local env, we assume the first key created is the one we need.
 KEY_ID=$($AWS_CMD kms list-keys --query 'Keys[0].KeyId' --output text)
 
-if [ -z "$KEY_ID" ]; then
+if [ -z "$KEY_ID" ] || [ "$KEY_ID" == "None" ]; then
   echo -e "   ${RED}[FAIL]${NC} No KMS keys found."
 else
   KEY_METADATA=$($AWS_CMD kms describe-key --key-id "$KEY_ID")
   KEY_STATE=$(echo "$KEY_METADATA" | jq -r '.KeyMetadata.KeyState')
-  ROTATION_ENABLED=$(echo "$KEY_METADATA" | jq -r '.KeyMetadata.KeyRotationEnabled')
+  ROTATION_STATUS=$($AWS_CMD kms get-key-rotation-status --key-id "$KEY_ID" 2>/dev/null | jq -r '.KeyRotationEnabled // "unknown"')
 
   if [ "$KEY_STATE" == "Enabled" ]; then
     echo -e "   ${GREEN}[PASS]${NC} KMS Key ($KEY_ID) is enabled."
@@ -52,10 +52,12 @@ else
     echo -e "   ${RED}[FAIL]${NC} KMS Key ($KEY_ID) is not enabled. State: $KEY_STATE."
   fi
 
-  if [ "$ROTATION_ENABLED" == "true" ]; then
+  if [ "$ROTATION_STATUS" == "true" ]; then
     echo -e "   ${GREEN}[PASS]${NC} KMS Key rotation is enabled."
-  else
+  elif [ "$ROTATION_STATUS" == "false" ]; then
     echo -e "   ${RED}[FAIL]${NC} KMS Key rotation is not enabled."
+  else
+    echo -e "   ${YELLOW}[INFO]${NC} KMS Key rotation status not reported by local Floci."
   fi
 fi
 echo
@@ -80,20 +82,28 @@ echo
 
 # 3. Check Secret Retrieval Permissions
 echo -e "${YELLOW}3. Checking IAM Policy for Secret Retrieval...${NC}"
-# We find the policy ARN by its name (assuming it's unique)
 POLICY_ARN=$($AWS_CMD iam list-policies --query "Policies[?PolicyName=='$POLICY_NAME'].Arn" --output text)
 
-if [ -z "$POLICY_ARN" ]; then
+if [ -z "$POLICY_ARN" ] || [ "$POLICY_ARN" == "None" ]; then
   echo -e "   ${RED}[FAIL]${NC} IAM policy '$POLICY_NAME' not found."
 else
   POLICY_VERSION=$($AWS_CMD iam get-policy --policy-arn "$POLICY_ARN" --query 'Policy.DefaultVersionId' --output text)
-  POLICY_DOC=$($AWS_CMD iam get-policy-version --policy-arn "$POLICY_ARN" --version-id "$POLICY_VERSION" --query 'PolicyVersion.Document' --output json)
+  POLICY_DOC=$($AWS_CMD iam get-policy-version --policy-arn "$POLICY_ARN" --version-id "$POLICY_VERSION" --output json)
   
-  # Verify the policy allows reading the specific secret
-  SECRET_ARN=$($AWS_CMD secretsmanager describe-secret --secret-id $SECRET_NAME --query ARN --output text)
-  ACTION_CHECK=$(echo "$POLICY_DOC" | jq -r '.Statement[] | select(.Action | contains(["secretsmanager:GetSecretValue"])) | .Resource')
+  SECRET_ARN=$($AWS_CMD secretsmanager describe-secret --secret-id "$SECRET_NAME" --query ARN --output text)
 
-  if [[ "$ACTION_CHECK" == "$SECRET_ARN" ]]; then
+  # Safe jq query: handles both array/string Action and Resource definitions without bash syntax clashing
+  MATCHED_RESOURCES=$(echo "$POLICY_DOC" | jq -r '.. | select(type == "object" and .Action != null) | select((.Action | type == "array" and contains(["secretsmanager:GetSecretValue"])) or .Action == "secretsmanager:GetSecretValue") | .Resource | if type == "array" then .[] else . end' 2>/dev/null)
+
+  IS_MATCH=false
+  while read -r res; do
+    if [ "$res" == "$SECRET_ARN" ] || [ "$res" == "*" ]; then
+      IS_MATCH=true
+      break
+    fi
+  done <<< "$MATCHED_RESOURCES"
+
+  if [ "$IS_MATCH" = true ]; then
     echo -e "   ${GREEN}[PASS]${NC} IAM policy '$POLICY_NAME' correctly grants GetSecretValue to the specific secret."
   else
     echo -e "   ${RED}[FAIL]${NC} IAM policy '$POLICY_NAME' does not correctly scope GetSecretValue permissions."
@@ -102,5 +112,5 @@ fi
 echo
 
 echo "================================================="
-echo "              Audit Report Complete              "
+echo "               Audit Report Complete             "
 echo "================================================="

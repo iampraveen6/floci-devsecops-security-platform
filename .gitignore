@@ -1,0 +1,17 @@
+# Terraform local state and binaries
+.terraform/
+.terraform.lock.hcl
+*.tfstate
+*.tfstate.backup
+*.tfvars
+*.tfvars.json
+
+# Local environment / secrets
+.env
+*.pem
+
+# OS / Editor temporary files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/

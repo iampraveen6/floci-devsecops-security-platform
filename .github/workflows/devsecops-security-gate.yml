@@ -16,15 +16,14 @@ jobs:
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch all history for Gitleaks to diff
 
       # 1. Gitleaks Secret Detection
       - name: Run Gitleaks secret detection
         uses: gitleaks/gitleaks-action@v2
-        with:
-          # By default, Gitleaks fails the build if secrets are found.
-          # The report will be uploaded as an artifact.
-          report_format: json
-          report_path: gitleaks-report.json
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       # 2. Trivy Vulnerability Scanner (Filesystem Scan)
       - name: Run Trivy vulnerability scanner in IaC mode
@@ -77,22 +76,15 @@ jobs:
         image: floci/floci:latest
         ports:
           - 4566:4566
-        # Healthcheck to ensure Floci is ready before tests run
-        options: --health-cmd="awslocal s3 ls" --health-interval=10s --health-timeout=5s --health-retries=5
 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Fetch all history for Gitleaks to diff
 
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
-
-      - name: Configure AWS Credentials for Floci
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: test
-          aws-secret-access-key: test
-          aws-region: us-east-1
 
       - name: Terraform Init
         run: terraform init

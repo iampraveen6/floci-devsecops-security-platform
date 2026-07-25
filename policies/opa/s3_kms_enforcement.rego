@@ -3,7 +3,7 @@
 package terraform.analysis
 
 # Deny if an S3 bucket does not have server-side encryption configured with KMS.
-deny[msg] {
+deny[msg] if {
     # Find all S3 bucket resources
     resource := input.resource.aws_s3_bucket[_]
 
@@ -15,7 +15,7 @@ deny[msg] {
 }
 
 # Deny if the server-side encryption configuration does not use 'aws:kms'.
-deny[msg] {
+deny[msg] if {
     # Find all S3 bucket resources with SSE configuration
     resource := input.resource.aws_s3_bucket[_]
     sse_config := resource.server_side_encryption_configuration[_]
@@ -28,17 +28,16 @@ deny[msg] {
 }
 
 # Deny if the KMS key ID is missing from the encryption configuration.
-deny[msg] {
+deny[msg] if {
     # Find all S3 bucket resources with SSE configuration
     resource := input.resource.aws_s3_bucket[_]
     sse_config := resource.server_side_encryption_configuration[_]
 
-    # Ensure the algorithm is 'aws:kms' before checking for the key
+    # Find a rule that uses 'aws:kms' but does not have a kms_master_key_id
     rule := sse_config.rule[_]
-    rule.apply_server_side_encryption_by_default[_].sse_algorithm == "aws:kms"
-
-    # Check if the kms_master_key_id is missing or empty
-    not rule.apply_server_side_encryption_by_default[_].kms_master_key_id
+    apply_default := rule.apply_server_side_encryption_by_default[i]
+    apply_default.sse_algorithm == "aws:kms"
+    not object.get(apply_default, "kms_master_key_id", false)
 
     # Format the denial message
     msg := sprintf("S3 bucket '%s' must specify a 'kms_master_key_id' for SSE.", [resource.name])

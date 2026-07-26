@@ -201,7 +201,6 @@ jobs:
             --directory ./terraform \
             --framework terraform \
             --output cli 
-        
 
       # =======================================================================
       # 9. Terraform Format Check
@@ -348,11 +347,24 @@ jobs:
             exit 1
           fi
 
-          opa eval \
-            --fail-defined \
+          # Evaluate policy and parse result without failing on empty set
+          OPA_OUTPUT=$(opa eval \
             --input ./terraform/tfplan.json \
             --data ./policies/opa/s3_kms_enforcement.rego \
-            'data.terraform.analysis.deny'
+            'data.terraform.analysis.deny')
+
+          echo "$OPA_OUTPUT"
+
+          # Extract violations array
+          VIOLATIONS=$(echo "$OPA_OUTPUT" | jq -r '.result[0].expressions[0].value')
+
+          # Fail step only if violations exist
+          if [ "$VIOLATIONS" != "[]" ] && [ "$VIOLATIONS" != "null" ]; then
+            echo "OPA Security Policy Violation(s) Detected!"
+            exit 1
+          fi
+
+          echo "OPA Security Policy Passed successfully!"
 
       # =======================================================================
       # 17. Upload Terraform Plan

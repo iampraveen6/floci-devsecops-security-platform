@@ -1,7 +1,3 @@
-# ============================================================
-# DevSecOps Security Gate
-# ============================================================
-
 name: DevSecOps Security Gate
 
 on:
@@ -11,16 +7,8 @@ on:
 
   workflow_dispatch:
 
-# ============================================================
-# Permissions
-# ============================================================
-
 permissions:
   contents: read
-
-# ============================================================
-# Global Environment
-# ============================================================
 
 env:
   TF_IN_AUTOMATION: "true"
@@ -33,12 +21,8 @@ env:
   TRIVY_VERSION: "0.70.0"
   OPA_VERSION: "1.17.0"
 
-  FLOCI_IMAGE: "floci/floci@sha256:d2ecc8035822b23b8587a56eab15edd825f41d3fb80d93e8e66680410beddc08"
+  FLOCI_IMAGE: "floci/floci:latest"
 
-
-# ============================================================
-# JOBS
-# ============================================================
 
 jobs:
 
@@ -54,7 +38,7 @@ jobs:
     steps:
 
       # ========================================================
-      # CHECKOUT
+      # CHECKOUT REPOSITORY
       # ========================================================
 
       - name: Checkout repository
@@ -76,19 +60,13 @@ jobs:
           git remote add origin \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
-          echo "Fetching repository..."
-
           git fetch \
             --no-tags \
-            --prune \
+            --depth=1 \
             origin \
-            "+refs/heads/*:refs/remotes/origin/*"
-
-          echo "Checking out ${GITHUB_SHA}"
-
-          git checkout \
-            --force \
             "${GITHUB_SHA}"
+
+          git checkout --force FETCH_HEAD
 
           git remote remove origin
 
@@ -99,10 +77,56 @@ jobs:
 
 
       # ========================================================
-      # INSTALL SYSTEM PACKAGES
+      # VERIFY WORKFLOW CONTENT
       # ========================================================
 
-      - name: Install required system packages
+      - name: Verify workflow configuration
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "Workflow Configuration Verification"
+          echo "=========================================="
+
+          WORKFLOW_FILE=".github/workflows/devsecops-security-gate.yml"
+
+          if [ ! -f "$WORKFLOW_FILE" ]; then
+            echo "ERROR: Workflow file not found."
+            exit 1
+          fi
+
+          echo ""
+          echo "Workflow file:"
+          echo "$WORKFLOW_FILE"
+
+          echo ""
+          echo "Current commit:"
+          git rev-parse HEAD
+
+          echo ""
+          echo "Trivy references in workflow:"
+
+          grep -n -E "trivy|ignore-unfixed" "$WORKFLOW_FILE" || true
+
+          echo ""
+          echo "Checking for invalid --ignore-unfixed usage..."
+
+          if grep -n -B5 -A5 "trivy config" "$WORKFLOW_FILE" | grep -q -- "--ignore-unfixed"; then
+            echo ""
+            echo "ERROR: --ignore-unfixed is being used with trivy config."
+            exit 1
+          fi
+
+          echo ""
+          echo "Workflow configuration verification passed."
+
+
+      # ========================================================
+      # SYSTEM DEPENDENCIES
+      # ========================================================
+
+      - name: Install system dependencies
         shell: bash
         run: |
           set -euo pipefail
@@ -115,13 +139,15 @@ jobs:
 
           sudo apt-get install \
             --yes \
-            unzip \
             curl \
-            jq
+            unzip \
+            jq \
+            tar \
+            gzip
 
 
       # ========================================================
-      # INSTALL TERRAFORM
+      # TERRAFORM
       # ========================================================
 
       - name: Install Terraform
@@ -135,7 +161,7 @@ jobs:
           echo "Installing Terraform ${VERSION}"
           echo "=========================================="
 
-          WORK_DIR="$(mktemp -d)"
+          TEMP_DIR="$(mktemp -d)"
 
           curl \
             --fail \
@@ -143,89 +169,23 @@ jobs:
             --show-error \
             --location \
             "https://releases.hashicorp.com/terraform/${VERSION}/terraform_${VERSION}_linux_amd64.zip" \
-            --output "${WORK_DIR}/terraform.zip"
+            --output "${TEMP_DIR}/terraform.zip"
 
           unzip \
             -o \
-            "${WORK_DIR}/terraform.zip" \
-            -d "${WORK_DIR}"
+            "${TEMP_DIR}/terraform.zip" \
+            -d "${TEMP_DIR}"
 
           sudo install \
             -m 0755 \
-            "${WORK_DIR}/terraform" \
+            "${TEMP_DIR}/terraform" \
             /usr/local/bin/terraform
 
-          echo ""
-          echo "Terraform:"
-          /usr/local/bin/terraform version
-
-
-      # ========================================================
-      # VERIFY TERRAFORM
-      # ========================================================
-
-      - name: Verify Terraform
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          export PATH="/usr/local/bin:${PATH}"
-
-          if [ ! -x /usr/local/bin/terraform ]; then
-            echo "ERROR: Terraform was not installed."
-            exit 1
-          fi
-
-          echo "Terraform binary:"
-          ls -lh /usr/local/bin/terraform
-
-          echo ""
-          echo "Terraform version:"
           terraform version
 
 
       # ========================================================
-      # ENVIRONMENT CHECK
-      # ========================================================
-
-      - name: Check environment
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          export PATH="/usr/local/bin:${PATH}"
-
-          echo "=========================================="
-          echo "Environment"
-          echo "=========================================="
-
-          echo ""
-          echo "Runner:"
-          uname -a
-
-          echo ""
-          echo "Git:"
-          git --version
-
-          echo ""
-          echo "Docker:"
-          docker --version
-
-          echo ""
-          echo "Terraform:"
-          terraform version
-
-          echo ""
-          echo "Python:"
-          python3 --version
-
-          echo ""
-          echo "Pip:"
-          python3 -m pip --version
-
-
-      # ========================================================
-      # INSTALL GITLEAKS
+      # GITLEAKS
       # ========================================================
 
       - name: Install Gitleaks
@@ -257,30 +217,11 @@ jobs:
             /tmp/gitleaks \
             /usr/local/bin/gitleaks
 
-          echo ""
           gitleaks version
 
 
       # ========================================================
-      # GITLEAKS SECRET SCAN
-      # ========================================================
-
-      - name: Run Gitleaks secret detection
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "=========================================="
-          echo "Gitleaks Secret Detection"
-          echo "=========================================="
-
-          gitleaks git \
-            --redact \
-            --verbose
-
-
-      # ========================================================
-      # INSTALL TRIVY
+      # TRIVY
       # ========================================================
 
       - name: Install Trivy
@@ -313,32 +254,11 @@ jobs:
             /usr/local/bin/trivy
 
           echo ""
-          echo "Trivy version:"
           trivy --version
 
 
       # ========================================================
-      # TRIVY IaC SCAN
-      # ========================================================
-
-      - name: Run Trivy IaC scan
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "=========================================="
-          echo "Trivy IaC Security Scan"
-          echo "=========================================="
-
-          trivy config \
-            --severity HIGH,CRITICAL \
-            --exit-code 1 \
-            --format table \
-            .
-
-
-      # ========================================================
-      # INSTALL CHECKOV
+      # CHECKOV
       # ========================================================
 
       - name: Install Checkov
@@ -360,13 +280,139 @@ jobs:
             checkov \
             --break-system-packages
 
-          echo ""
-          echo "Checkov version:"
           checkov --version
 
 
       # ========================================================
-      # CHECKOV TERRAFORM SCAN
+      # OPA
+      # ========================================================
+
+      - name: Install OPA
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${OPA_VERSION}"
+
+          echo "=========================================="
+          echo "Installing OPA ${VERSION}"
+          echo "=========================================="
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --location \
+            "https://openpolicyagent.org/downloads/v${VERSION}/opa_linux_amd64_static" \
+            --output /tmp/opa
+
+          sudo install \
+            -m 0755 \
+            /tmp/opa \
+            /usr/local/bin/opa
+
+          opa version
+
+
+      # ========================================================
+      # ENVIRONMENT
+      # ========================================================
+
+      - name: Check environment
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "Environment"
+          echo "=========================================="
+
+          echo ""
+          echo "Runner:"
+          uname -a
+
+          echo ""
+          echo "Git:"
+          git --version
+
+          echo ""
+          echo "Docker:"
+          docker --version
+
+          echo ""
+          echo "Terraform:"
+          terraform version
+
+          echo ""
+          echo "Gitleaks:"
+          gitleaks version
+
+          echo ""
+          echo "Trivy:"
+          trivy --version
+
+          echo ""
+          echo "Checkov:"
+          checkov --version
+
+          echo ""
+          echo "OPA:"
+          opa version
+
+
+      # ========================================================
+      # GITLEAKS
+      # ========================================================
+
+      - name: Run Gitleaks secret detection
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "Gitleaks Secret Detection"
+          echo "=========================================="
+
+          gitleaks git \
+            --redact \
+            --verbose
+
+
+      # ========================================================
+      # TRIVY IaC
+      #
+      # IMPORTANT:
+      # DO NOT USE --ignore-unfixed HERE.
+      # ========================================================
+
+      - name: Run Trivy IaC scan
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "Trivy IaC Security Scan"
+          echo "=========================================="
+
+          echo "Trivy version:"
+          trivy --version
+
+          echo ""
+          echo "Running:"
+          echo "trivy config --severity HIGH,CRITICAL --exit-code 1 --format table ."
+
+          echo ""
+          echo "Scanning Terraform and configuration files..."
+
+          trivy config \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            --format table \
+            .
+
+
+      # ========================================================
+      # CHECKOV
       # ========================================================
 
       - name: Run Checkov Terraform scan
@@ -395,8 +441,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          export PATH="/usr/local/bin:${PATH}"
-
           echo "=========================================="
           echo "Terraform Init"
           echo "=========================================="
@@ -415,8 +459,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          export PATH="/usr/local/bin:${PATH}"
-
           echo "=========================================="
           echo "Terraform Validate"
           echo "=========================================="
@@ -434,8 +476,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          export PATH="/usr/local/bin:${PATH}"
-
           echo "=========================================="
           echo "Terraform Plan"
           echo "=========================================="
@@ -449,45 +489,9 @@ jobs:
             tfplan.binary \
             > tfplan.json
 
-          echo ""
-          echo "Terraform plan generated successfully."
-
 
       # ========================================================
-      # INSTALL OPA
-      # ========================================================
-
-      - name: Install OPA
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          VERSION="${OPA_VERSION}"
-
-          echo "=========================================="
-          echo "Installing OPA ${VERSION}"
-          echo "=========================================="
-
-          curl \
-            --fail \
-            --silent \
-            --show-error \
-            --location \
-            "https://openpolicyagent.org/downloads/v${VERSION}/opa_linux_amd64_static" \
-            --output /tmp/opa
-
-          sudo install \
-            -m 0755 \
-            /tmp/opa \
-            /usr/local/bin/opa
-
-          echo ""
-          echo "OPA version:"
-          opa version
-
-
-      # ========================================================
-      # OPA POLICY VALIDATION
+      # OPA VALIDATION
       # ========================================================
 
       - name: Validate OPA policies
@@ -524,7 +528,7 @@ jobs:
 
 
       # ========================================================
-      # DOCKER BUILD
+      # BUILD APPLICATION
       # ========================================================
 
       - name: Build sample application
@@ -533,20 +537,20 @@ jobs:
           set -euo pipefail
 
           echo "=========================================="
-          echo "Docker Build"
+          echo "Building sample application"
           echo "=========================================="
 
           docker build \
             --tag sample-app:latest \
             ./app
 
-          echo ""
-          echo "Built image:"
-          docker images sample-app
+          docker images sample-app:latest
 
 
       # ========================================================
-      # TRIVY CONTAINER SCAN
+      # TRIVY IMAGE
+      #
+      # --ignore-unfixed IS VALID HERE.
       # ========================================================
 
       - name: Run Trivy container vulnerability scan
@@ -555,8 +559,10 @@ jobs:
           set -euo pipefail
 
           echo "=========================================="
-          echo "Trivy Container Security Scan"
+          echo "Trivy Container Vulnerability Scan"
           echo "=========================================="
+
+          echo "Running image vulnerability scan..."
 
           trivy image \
             --severity HIGH,CRITICAL \
@@ -567,7 +573,7 @@ jobs:
 
 
   # ============================================================
-  # LOCAL DEPLOYMENT TO FLOCI
+  # FLOCI LOCAL DEPLOYMENT
   # ============================================================
 
   local-deployment:
@@ -606,27 +612,24 @@ jobs:
 
           git fetch \
             --no-tags \
-            --prune \
+            --depth=1 \
             origin \
             "${GITHUB_SHA}"
 
           git checkout \
             --force \
-            "${GITHUB_SHA}"
+            FETCH_HEAD
 
           git remote remove origin
-
-          echo ""
-          echo "Repository checkout completed."
 
           git rev-parse HEAD
 
 
       # ========================================================
-      # INSTALL SYSTEM PACKAGES
+      # DEPENDENCIES
       # ========================================================
 
-      - name: Install required system packages
+      - name: Install dependencies
         shell: bash
         run: |
           set -euo pipefail
@@ -635,13 +638,15 @@ jobs:
 
           sudo apt-get install \
             --yes \
-            unzip \
             curl \
-            jq
+            unzip \
+            jq \
+            tar \
+            gzip
 
 
       # ========================================================
-      # INSTALL TERRAFORM
+      # TERRAFORM
       # ========================================================
 
       - name: Install Terraform
@@ -651,11 +656,7 @@ jobs:
 
           VERSION="${TERRAFORM_VERSION}"
 
-          echo "=========================================="
-          echo "Installing Terraform ${VERSION}"
-          echo "=========================================="
-
-          WORK_DIR="$(mktemp -d)"
+          TEMP_DIR="$(mktemp -d)"
 
           curl \
             --fail \
@@ -663,49 +664,23 @@ jobs:
             --show-error \
             --location \
             "https://releases.hashicorp.com/terraform/${VERSION}/terraform_${VERSION}_linux_amd64.zip" \
-            --output "${WORK_DIR}/terraform.zip"
+            --output "${TEMP_DIR}/terraform.zip"
 
           unzip \
             -o \
-            "${WORK_DIR}/terraform.zip" \
-            -d "${WORK_DIR}"
+            "${TEMP_DIR}/terraform.zip" \
+            -d "${TEMP_DIR}"
 
           sudo install \
             -m 0755 \
-            "${WORK_DIR}/terraform" \
+            "${TEMP_DIR}/terraform" \
             /usr/local/bin/terraform
 
-          echo ""
-          echo "Terraform:"
-          /usr/local/bin/terraform version
-
-
-      # ========================================================
-      # VERIFY TERRAFORM
-      # ========================================================
-
-      - name: Verify Terraform
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          export PATH="/usr/local/bin:${PATH}"
-
-          if [ ! -x /usr/local/bin/terraform ]; then
-            echo "ERROR: Terraform was not installed."
-            exit 1
-          fi
-
-          echo "Terraform binary:"
-          ls -lh /usr/local/bin/terraform
-
-          echo ""
-          echo "Terraform version:"
           terraform version
 
 
       # ========================================================
-      # DOCKER CHECK
+      # DOCKER
       # ========================================================
 
       - name: Check Docker
@@ -713,21 +688,14 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "=========================================="
-          echo "Docker"
-          echo "=========================================="
-
           docker version
 
-          echo ""
-          docker info
-
 
       # ========================================================
-      # FLOCI IMAGE
+      # FLOCI
       # ========================================================
 
-      - name: Pull Floci image
+      - name: Pull Floci
         shell: bash
         run: |
           set -euo pipefail
@@ -738,24 +706,17 @@ jobs:
 
           for attempt in 1 2 3 4 5; do
 
-            echo "Pull attempt ${attempt}/5..."
+            echo "Pull attempt ${attempt}/5"
 
             if docker pull "${FLOCI_IMAGE}"; then
-              echo "Floci image pulled successfully."
               exit 0
             fi
 
-            echo "Pull failed."
-
-            if [ "${attempt}" -lt 5 ]; then
-              sleep $((attempt * 5))
-            fi
+            sleep $((attempt * 5))
 
           done
 
-          echo "ERROR: Unable to pull Floci image."
-
-          docker info
+          echo "Failed to pull Floci."
 
           exit 1
 
@@ -769,10 +730,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "=========================================="
-          echo "Starting Floci"
-          echo "=========================================="
-
           docker rm \
             --force \
             floci 2>/dev/null || true
@@ -783,35 +740,11 @@ jobs:
             --publish 4566:4566 \
             "${FLOCI_IMAGE}"
 
-          echo ""
-          echo "Floci started."
-
           docker ps -a
 
 
       # ========================================================
-      # FLOCI LOGS
-      # ========================================================
-
-      - name: Check Floci container
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "=========================================="
-          echo "Floci Container"
-          echo "=========================================="
-
-          docker ps -a
-
-          echo ""
-          echo "Floci logs:"
-
-          docker logs floci || true
-
-
-      # ========================================================
-      # FLOCI READINESS
+      # FLOCI HEALTH CHECK
       # ========================================================
 
       - name: Wait for Floci
@@ -825,7 +758,7 @@ jobs:
 
           for attempt in {1..30}; do
 
-            echo "Health check ${attempt}/30..."
+            echo "Health check ${attempt}/30"
 
             if curl \
               --silent \
@@ -850,6 +783,8 @@ jobs:
           docker ps -a
 
           echo ""
+          echo "Floci logs:"
+
           docker logs floci || true
 
           exit 1
@@ -871,12 +806,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          export PATH="/usr/local/bin:${PATH}"
-
-          echo "=========================================="
-          echo "Terraform Init"
-          echo "=========================================="
-
           terraform init \
             -input=false
 
@@ -890,12 +819,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
-          export PATH="/usr/local/bin:${PATH}"
-
-          echo "=========================================="
-          echo "Terraform Validate"
-          echo "=========================================="
 
           terraform validate
 
@@ -916,8 +839,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          export PATH="/usr/local/bin:${PATH}"
-
           echo "=========================================="
           echo "Terraform Apply"
           echo "=========================================="
@@ -925,6 +846,26 @@ jobs:
           terraform apply \
             -input=false \
             -auto-approve
+
+
+      # ========================================================
+      # FLOCI DIAGNOSTICS
+      # ========================================================
+
+      - name: Floci diagnostics
+        if: always()
+        shell: bash
+        run: |
+          echo "=========================================="
+          echo "Floci Diagnostics"
+          echo "=========================================="
+
+          docker ps -a || true
+
+          echo ""
+          echo "Floci logs:"
+
+          docker logs floci 2>&1 || true
 
 
   # ============================================================
@@ -962,7 +903,7 @@ jobs:
             exit 0
           fi
 
-          MESSAGE="🚨 DevSecOps Security Gate failed
+          MESSAGE="DevSecOps Security Gate failed
           Repository: ${GITHUB_REPOSITORY}
           Branch: ${GITHUB_REF_NAME}
           Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"

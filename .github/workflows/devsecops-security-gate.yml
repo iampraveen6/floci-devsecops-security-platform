@@ -1,4 +1,6 @@
-# GitHub Actions Workflow: DevSecOps Security Gate
+# ============================================================
+# DevSecOps Security Gate
+# ============================================================
 
 name: DevSecOps Security Gate
 
@@ -6,101 +8,591 @@ on:
   pull_request:
     branches:
       - main
-  workflow_dispatch: # Allows manual triggering
+
+  workflow_dispatch:
+
+# ============================================================
+# Permissions
+# ============================================================
+
+permissions:
+  contents: read
+
+# ============================================================
+# Global Environment
+# ============================================================
+
+env:
+  TF_IN_AUTOMATION: "true"
+  AWS_DEFAULT_REGION: us-east-1
+  AWS_REGION: us-east-1
+
+  # Security tool versions
+  GITLEAKS_VERSION: "8.24.2"
+  TRIVY_VERSION: "0.70.0"
+  OPA_VERSION: "1.17.0"
+
+  # Floci image pinned by digest
+  FLOCI_IMAGE: "floci/floci@sha256:d2ecc8035822b23b8587a56eab15edd825f41d3fb80d93e8e66680410beddc08"
+
+
+# ============================================================
+# SECURITY SCANS
+# ============================================================
 
 jobs:
+
   security-scans:
+
     name: Security Scans
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # Fetch all history for Gitleaks to diff
 
-      # 1. Gitleaks Secret Detection
-      - name: Run Gitleaks secret detection
-        uses: gitleaks/gitleaks-action@v3.0.0
+      # ========================================================
+      # CHECKOUT
+      # ========================================================
+
+      - name: Checkout repository
+        shell: bash
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
 
-      # 2. Trivy Vulnerability Scanner (Filesystem Scan)
-      - name: Run Trivy vulnerability scanner in IaC mode
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'config'
-          scan-ref: '.'
-          format: 'table'
-          exit-code: '1' # Fail on issues
-          ignore-unfixed: true
-          severity: 'CRITICAL,HIGH'
+          echo "Initializing repository..."
 
-      # 3. Checkov IaC Policy-as-Code Scan
-      - name: Run Checkov scan
-        uses: bridgecrewio/checkov-action@master
-        with:
-          directory: ./terraform
-          framework: terraform
-          output_format: cli
-          soft_fail: false # Fail the build on any failed check
+          git init .
 
-      # 4. OPA/Rego Policy Test against Terraform IaC
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+          git remote add origin \
+            "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+
+          git -c http.extraheader="AUTHORIZATION: bearer ${GH_TOKEN}" \
+            fetch \
+            --no-tags \
+            --prune \
+            --depth=0 \
+            origin \
+            "${GITHUB_SHA}"
+
+          git checkout --force "${GITHUB_SHA}"
+
+          echo "Repository checkout completed."
+
+      # ========================================================
+      # ENVIRONMENT
+      # ========================================================
+
+      - name: Check environment
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "Runner Information"
+          echo "=========================================="
+
+          uname -a
+
+          echo ""
+          echo "Git:"
+          git --version
+
+          echo ""
+          echo "Docker:"
+          docker --version
+
+          echo ""
+          echo "Terraform:"
+          terraform version
+
+          echo ""
+          echo "Python:"
+          python3 --version
+
+          echo ""
+          echo "Pip:"
+          python3 -m pip --version
+
+      # ========================================================
+      # GITLEAKS
+      # ========================================================
+
+      - name: Install Gitleaks
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${GITLEAKS_VERSION}"
+
+          echo "Installing Gitleaks ${VERSION}..."
+
+          curl -fsSL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${VERSION}/gitleaks_${VERSION}_linux_x64.tar.gz" \
+            -o /tmp/gitleaks.tar.gz
+
+          tar \
+            -xzf /tmp/gitleaks.tar.gz \
+            -C /tmp
+
+          sudo install \
+            /tmp/gitleaks \
+            /usr/local/bin/gitleaks
+
+          echo "Installed Gitleaks:"
+          gitleaks version
+
+      - name: Run Gitleaks secret detection
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Running Gitleaks..."
+
+          gitleaks detect \
+            --source . \
+            --redact \
+            --verbose
+
+      # ========================================================
+      # TRIVY
+      # ========================================================
+
+      - name: Install Trivy
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${TRIVY_VERSION}"
+
+          echo "Installing Trivy ${VERSION}..."
+
+          curl -fsSL \
+            "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_Linux-64bit.tar.gz" \
+            -o /tmp/trivy.tar.gz
+
+          tar \
+            -xzf /tmp/trivy.tar.gz \
+            -C /tmp
+
+          sudo install \
+            /tmp/trivy \
+            /usr/local/bin/trivy
+
+          echo "Installed Trivy:"
+          trivy --version
+
+      # ========================================================
+      # TRIVY IaC SCAN
+      # ========================================================
+
+      - name: Run Trivy IaC scan
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Running Trivy IaC security scan..."
+
+          trivy config \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --exit-code 1 \
+            --format table \
+            .
+
+      # ========================================================
+      # CHECKOV
+      # ========================================================
+
+      - name: Install Checkov
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Installing Checkov..."
+
+          python3 -m pip install \
+            --upgrade \
+            pip
+
+          python3 -m pip install \
+            --upgrade \
+            checkov
+
+          echo "Installed Checkov:"
+          checkov --version
+
+      # ========================================================
+      # CHECKOV TERRAFORM SCAN
+      # ========================================================
+
+      - name: Run Checkov Terraform scan
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Running Checkov..."
+
+          checkov \
+            --directory ./terraform \
+            --framework terraform \
+            --output cli \
+            --soft-fail false
+
+      # ========================================================
+      # TERRAFORM INIT
+      # ========================================================
 
       - name: Terraform Init
-        run: terraform init
         working-directory: ./terraform
-
-      - name: Terraform Plan and Convert to JSON
+        shell: bash
         run: |
-          terraform plan -out=tfplan.binary
-          terraform show -json tfplan.binary > tfplan.json
+          set -euo pipefail
+
+          terraform init \
+            -input=false
+
+      # ========================================================
+      # TERRAFORM VALIDATE
+      # ========================================================
+
+      - name: Terraform Validate
         working-directory: ./terraform
-
-      - name: Setup OPA
-        uses: open-policy-agent/setup-opa@v2
-
-      - name: Run OPA test
+        shell: bash
         run: |
-          opa eval --fail --input terraform/tfplan.json --data policies/opa/s3_kms_enforcement.rego 'data.terraform.analysis.deny'
+          set -euo pipefail
 
-      # 5. Container Scan (Sample Application)
-      - name: Build sample app Docker image
-        run: docker build -t sample-app:latest ./app
+          terraform validate
+
+      # ========================================================
+      # TERRAFORM PLAN
+      # ========================================================
+
+      - name: Terraform Plan
+        working-directory: ./terraform
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          terraform plan \
+            -input=false \
+            -out=tfplan.binary
+
+          terraform show \
+            -json \
+            tfplan.binary \
+            > tfplan.json
+
+          echo "Terraform plan generated successfully."
+
+      # ========================================================
+      # OPA
+      # ========================================================
+
+      - name: Install OPA
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          VERSION="${OPA_VERSION}"
+
+          echo "Installing OPA ${VERSION}..."
+
+          curl -fsSL \
+            "https://openpolicyagent.org/downloads/v${VERSION}/opa_linux_amd64_static" \
+            -o /tmp/opa
+
+          sudo install \
+            /tmp/opa \
+            /usr/local/bin/opa
+
+          echo "Installed OPA:"
+          opa version
+
+      # ========================================================
+      # OPA POLICY SYNTAX VALIDATION
+      # ========================================================
+
+      - name: Validate OPA policies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Validating Rego policies..."
+
+          opa check \
+            policies/opa
+
+      # ========================================================
+      # OPA TERRAFORM POLICY
+      # ========================================================
+
+      - name: Run OPA Terraform policy
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Running OPA Terraform policy..."
+
+          opa eval \
+            --fail \
+            --input terraform/tfplan.json \
+            --data policies/opa/s3_kms_enforcement.rego \
+            'data.terraform.analysis.deny'
+
+      # ========================================================
+      # DOCKER BUILD
+      # ========================================================
+
+      - name: Build sample application
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Building sample application..."
+
+          docker build \
+            --tag sample-app:latest \
+            ./app
+
+          echo "Docker image created:"
+          docker images sample-app
+
+      # ========================================================
+      # TRIVY CONTAINER SCAN
+      # ========================================================
 
       - name: Run Trivy container vulnerability scan
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: 'image'
-          image-ref: 'sample-app:latest'
-          format: 'table'
-          exit-code: '0'
-          severity: 'CRITICAL,HIGH'
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Running Trivy container scan..."
+
+          trivy image \
+            --severity HIGH,CRITICAL \
+            --ignore-unfixed \
+            --exit-code 1 \
+            --format table \
+            sample-app:latest
+
+
+# ============================================================
+# LOCAL DEPLOYMENT TO FLOCI
+# ============================================================
 
   local-deployment:
-    name: Local Deployment to Floci
-    runs-on: ubuntu-latest
-    needs: security-scans # This job runs only if security-scans succeeds
 
-    services:
-      floci:
-        image: floci/floci:latest
-        ports:
-          - 4566:4566
+    name: Local Deployment to Floci
+
+    runs-on: ubuntu-latest
+
+    needs:
+      - security-scans
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0 # Fetch all history for Gitleaks to diff
 
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+      # ========================================================
+      # CHECKOUT
+      # ========================================================
+
+      - name: Checkout repository
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+
+          echo "Initializing repository..."
+
+          git init .
+
+          git remote add origin \
+            "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+
+          git -c http.extraheader="AUTHORIZATION: bearer ${GH_TOKEN}" \
+            fetch \
+            --no-tags \
+            --prune \
+            --depth=0 \
+            origin \
+            "${GITHUB_SHA}"
+
+          git checkout --force "${GITHUB_SHA}"
+
+          echo "Repository checkout completed."
+
+      # ========================================================
+      # DOCKER CHECK
+      # ========================================================
+
+      - name: Check Docker
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          docker version
+          docker info
+
+      # ========================================================
+      # FLOCI IMAGE PULL
+      # ========================================================
+
+      - name: Pull Floci image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "Floci Image"
+          echo "=========================================="
+
+          echo "${FLOCI_IMAGE}"
+
+          echo ""
+          echo "Pulling Floci..."
+
+          for attempt in 1 2 3 4 5; do
+
+            echo ""
+            echo "Pull attempt ${attempt}/5"
+
+            if docker pull "${FLOCI_IMAGE}"; then
+
+              echo ""
+              echo "Floci image pulled successfully."
+
+              exit 0
+
+            fi
+
+            echo "Floci pull failed."
+
+            if [ "${attempt}" -lt 5 ]; then
+              sleep $((attempt * 5))
+            fi
+
+          done
+
+          echo ""
+          echo "ERROR: Unable to pull Floci image."
+
+          docker info
+
+          exit 1
+
+      # ========================================================
+      # START FLOCI
+      # ========================================================
+
+      - name: Start Floci
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Removing previous Floci container if present..."
+
+          docker rm \
+            --force \
+            floci 2>/dev/null || true
+
+          echo "Starting Floci..."
+
+          docker run \
+            --detach \
+            --name floci \
+            --publish 4566:4566 \
+            "${FLOCI_IMAGE}"
+
+          echo "Floci container started."
+
+      # ========================================================
+      # FLOCI STATUS
+      # ========================================================
+
+      - name: Check Floci container
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "Docker Containers"
+          echo "=========================================="
+
+          docker ps -a
+
+          echo ""
+          echo "=========================================="
+          echo "Floci Logs"
+          echo "=========================================="
+
+          docker logs floci || true
+
+      # ========================================================
+      # FLOCI READINESS
+      # ========================================================
+
+      - name: Wait for Floci
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Waiting for Floci on port 4566..."
+
+          for attempt in {1..30}; do
+
+            echo "Health check attempt ${attempt}/30"
+
+            if curl \
+              --silent \
+              --show-error \
+              --fail \
+              --max-time 5 \
+              http://localhost:4566/ \
+              >/dev/null 2>&1; then
+
+              echo ""
+              echo "Floci is ready."
+
+              exit 0
+
+            fi
+
+            sleep 2
+
+          done
+
+          echo ""
+          echo "=========================================="
+          echo "ERROR: Floci failed to become ready"
+          echo "=========================================="
+
+          echo ""
+          echo "Container status:"
+          docker ps -a
+
+          echo ""
+          echo "Floci logs:"
+          docker logs floci || true
+
+          exit 1
+
+      # ========================================================
+      # TERRAFORM VERSION
+      # ========================================================
+
+      - name: Check Terraform
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          terraform version
+
+      # ========================================================
+      # TERRAFORM INIT
+      # ========================================================
 
       - name: Terraform Init
-        run: terraform init
         working-directory: ./terraform
         env:
           AWS_ENDPOINT_URL_S3: http://localhost:4566
@@ -108,9 +600,30 @@ jobs:
           AWS_ENDPOINT_URL_SECRETSMANAGER: http://localhost:4566
           AWS_ENDPOINT_URL_IAM: http://localhost:4566
           AWS_ENDPOINT_URL_STS: http://localhost:4566
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          terraform init \
+            -input=false
+
+      # ========================================================
+      # TERRAFORM VALIDATE
+      # ========================================================
+
+      - name: Terraform Validate
+        working-directory: ./terraform
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          terraform validate
+
+      # ========================================================
+      # TERRAFORM APPLY
+      # ========================================================
 
       - name: Terraform Apply
-        run: terraform apply -auto-approve
         working-directory: ./terraform
         env:
           AWS_ENDPOINT_URL_S3: http://localhost:4566
@@ -118,20 +631,74 @@ jobs:
           AWS_ENDPOINT_URL_SECRETSMANAGER: http://localhost:4566
           AWS_ENDPOINT_URL_IAM: http://localhost:4566
           AWS_ENDPOINT_URL_STS: http://localhost:4566
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          terraform apply \
+            -input=false \
+            -auto-approve
+
+
+# ============================================================
+# FAILURE NOTIFICATION
+# ============================================================
 
   notify-on-failure:
+
     name: Slack Failure Notification
+
     runs-on: ubuntu-latest
-    needs: [security-scans, local-deployment]
-    if: always() && failure()
+
+    needs:
+      - security-scans
+      - local-deployment
+
+    if: >-
+      always() &&
+      (
+        needs.security-scans.result == 'failure' ||
+        needs.local-deployment.result == 'failure'
+      )
+
     steps:
+
+      # ========================================================
+      # SLACK NOTIFICATION
+      # ========================================================
+
       - name: Send Slack notification
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+
+        shell: bash
+
         run: |
-          if [ -n "$SLACK_WEBHOOK_URL" ]; then
-            curl -X POST -H 'Content-type: application/json' \
-              --data '{"text":"DevSecOps Security Gate failed for ${{ github.repository }}\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}' \
-              "$SLACK_WEBHOOK_URL"
+          set -euo pipefail
+
+          if [ -z "${SLACK_WEBHOOK_URL:-}" ]; then
+
+            echo "SLACK_WEBHOOK_URL is not configured."
+
+            exit 0
+
           fi
-        continue-on-error: true
+
+          MESSAGE="🚨 DevSecOps Security Gate failed
+          Repository: ${GITHUB_REPOSITORY}
+          Branch: ${GITHUB_REF_NAME}
+          Run: ${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}"
+
+          PAYLOAD=$(jq \
+            -n \
+            --arg text "$MESSAGE" \
+            '{text: $text}')
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --request POST \
+            --header "Content-Type: application/json" \
+            --data "$PAYLOAD" \
+            "$SLACK_WEBHOOK_URL"

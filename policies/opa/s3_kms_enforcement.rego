@@ -8,7 +8,6 @@ deny contains msg if {
     resource.type == "aws_s3_bucket"
     resource.change.actions[_] != "delete"
 
-    # Check if any sse configuration references this bucket name in its address or dependencies
     bucket_name := split(resource.address, ".")[1]
     not sse_config_exists_for(bucket_name)
 
@@ -39,7 +38,7 @@ deny contains msg if {
     msg := sprintf("S3 bucket encryption configuration '%s' must use 'aws:kms'.", [resource.address])
 }
 
-# Deny if kms_master_key_id is missing when using 'aws:kms'
+# Deny if kms_master_key_id is completely absent or empty when using 'aws:kms'
 deny contains msg if {
     some resource in input.resource_changes
     resource.type == "aws_s3_bucket_server_side_encryption_configuration"
@@ -51,8 +50,16 @@ deny contains msg if {
 
     default_encryption.sse_algorithm == "aws:kms"
     
-    # Check if kms_master_key_id is null, missing, or empty
-    not default_encryption.kms_master_key_id
+    # Check if key id is missing entirely from both 'after' and expressions
+    missing_key_id(default_encryption)
 
     msg := sprintf("S3 bucket encryption configuration '%s' must specify a 'kms_master_key_id'.", [resource.address])
+}
+
+missing_key_id(encryption_obj) if {
+    not encryption_obj.kms_master_key_id
+}
+
+missing_key_id(encryption_obj) if {
+    encryption_obj.kms_master_key_id == ""
 }

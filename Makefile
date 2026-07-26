@@ -1,4 +1,4 @@
-.PHONY: start-floci stop-floci deploy audit clean all
+.PHONY: start-floci stop-floci deploy audit clean all build-sample-app run-sample-app
 
 start-floci:
 	docker kill floci 2>/dev/null || true
@@ -21,4 +21,15 @@ audit:
 
 clean: stop-floci
 
-all: deploy audit
+build-sample-app:
+	docker build -t sample-app ./app
+
+run-sample-app: build-sample-app
+	docker stop sample-app || true
+	docker rm sample-app || true
+	docker run --rm -d -p 5000:5000 --name sample-app sample-app
+
+all:
+	$(MAKE) deploy
+	$(MAKE) run-sample-app
+	$(MAKE) audit

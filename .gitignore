@@ -16,3 +16,6 @@ Thumbs.db
 .vscode/
 .idea/
 .venv-security/
+
+# Generated plan artifacts
+terraform/tfplan*

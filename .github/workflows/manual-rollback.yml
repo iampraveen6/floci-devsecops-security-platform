@@ -1,0 +1,84 @@
+name: Manual Infrastructure Rollback
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_environment:
+        description: 'Environment to roll back'
+        required: true
+        default: 'local-floci'
+        type: choice
+        options:
+          - local-floci
+          - staging
+          - production
+      confirm_rollback:
+        description: 'Type "ROLLBACK" to confirm emergency action'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  rollback:
+    name: Execute Manual Rollback
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      # 1. Safety Guard: Validate Confirmation String
+      - name: Validate confirmation
+        run: |
+          if [ "${{ github.event.inputs.confirm_rollback }}" != "ROLLBACK" ]; stream
+            echo "::error::Rollback canceled: Confirmation string did not match 'ROLLBACK'."
+            exit 1
+          fi
+          echo "Confirmation verified. Initiating teardown..."
+
+      # 2. Checkout
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 3. Setup Terraform
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.8"
+
+      # 4. Spin up local mock service if rolling back Floci
+      - name: Spin up Floci endpoint (if target is local)
+        if: ${{ inputs.target_environment == 'local-floci' }}
+        run: |
+          docker run -d -p 4566:4566 --name floci floci/floci:latest
+          sleep 5
+
+      # 5. Execute Destroy / Rollback
+      - name: Run Terraform Destroy
+        working-directory: ./terraform
+        env:
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_DEFAULT_REGION: us-east-1
+          AWS_ENDPOINT_URL_S3: http://localhost:4566
+          AWS_ENDPOINT_URL_KMS: http://localhost:4566
+          AWS_ENDPOINT_URL_SECRETSMANAGER: http://localhost:4566
+          AWS_ENDPOINT_URL_IAM: http://localhost:4566
+          AWS_ENDPOINT_URL_STS: http://localhost:4566
+        run: |
+          set -euo pipefail
+          echo "=========================================="
+          echo "Rolling back environment: ${{ inputs.target_environment }}"
+          echo "=========================================="
+          
+          terraform init -backend=false
+          terraform destroy -auto-approve -input=false
+
+      # 6. Audit Log Summary
+      - name: Rollback summary
+        if: always()
+        run: |
+          echo "### ⚠️ Manual Rollback Audit Log" >> $GITHUB_STEP_SUMMARY
+          echo "- **Triggered By:** @${{ github.actor }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Target Environment:** ${{ inputs.target_environment }}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Status:** Finished" >> $GITHUB_STEP_SUMMARY

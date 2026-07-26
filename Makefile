@@ -1,10 +1,11 @@
 .PHONY: start-floci stop-floci deploy audit clean all
 
 start-floci:
+	docker kill floci 2>/dev/null || true
+	docker rm floci 2>/dev/null || true
 	docker run --rm -d \
 		-v /var/run/docker.sock:/var/run/docker.sock \
 		-p 4566:4566 \
-		-p 4510-4559:4510-4559 \
 		--name floci \
 		floci/floci:latest
 

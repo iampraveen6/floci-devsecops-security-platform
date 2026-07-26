@@ -590,3 +590,58 @@ chmod +x scripts/floci-security-audit.sh
 ```
 
 The audit exits with a non-zero status if any compliance check fails.
+
+### OPA Policy Demo
+
+`policies/opa/s3_kms_enforcement.rego` enforces two S3 encryption controls:
+
+1. Every `aws_s3_bucket` must have a matching `aws_s3_bucket_server_side_encryption_configuration`.
+2. Non-log buckets must use `aws:kms` and specify a `kms_master_key_id`.
+
+Run each scenario with `make` or `bash`:
+
+#### Positive Case — Compliant S3 Plan
+
+The plan contains an S3 bucket plus a `aws:kms` encryption configuration.
+
+```bash
+make opa-demo-positive
+# or
+bash scripts/opa-demo-positive.sh
+```
+
+Expected output:
+
+```text
+=== OPA Positive Case ===
+data.terraform.analysis.test_positive: PASS (...)
+PASS: 1/1
+```
+
+The compliant plan is allowed.
+
+#### Negative Case — S3 Bucket Without Encryption
+
+The plan contains only an S3 bucket, so OPA denies it.
+
+```bash
+make opa-demo-negative
+# or
+bash scripts/opa-demo-negative.sh
+```
+
+Expected output:
+
+```text
+=== OPA Negative Case ===
+data.terraform.analysis.test_negative: PASS (...)
+PASS: 1/1
+```
+
+The non-compliant plan is denied with:
+
+```text
+S3 bucket 'aws_s3_bucket.audit_bucket' must have server-side encryption (SSE) configured.
+```
+
+Both scripts run OPA in a Docker container against `policies/opa/s3_kms_enforcement_test.rego`.

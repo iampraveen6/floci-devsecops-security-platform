@@ -1,4 +1,4 @@
-.PHONY: start-floci stop-floci deploy audit clean all build-sample-app run-sample-app
+.PHONY: start-floci stop-floci deploy audit clean all build-sample-app run-sample-app opa-demo-positive opa-demo-negative
 
 start-floci:
 	docker kill floci 2>/dev/null || true
@@ -33,3 +33,14 @@ all:
 	$(MAKE) deploy
 	$(MAKE) run-sample-app
 	$(MAKE) audit
+
+opa-demo-positive:
+	bash scripts/opa-demo-positive.sh
+
+opa-demo-negative:
+	bash scripts/opa-demo-negative.sh
+
+# Run both OPA demo scenarios together (uncomment to enable)
+# opa-demo:
+#	bash scripts/opa-demo-positive.sh
+#	bash scripts/opa-demo-negative.sh

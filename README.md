@@ -27,7 +27,7 @@ A production-ready GitHub repository for DevSecOps, Application Security, Supply
 
 ## Quick Start
 
-One command starts Floci, deploys the Terraform resources, and runs the security audit:
+One command starts Floci, builds and runs the sample app, deploys the Terraform resources, and runs the security audit:
 
 ```bash
 make all
@@ -36,12 +36,14 @@ make all
 Common `Makefile` helpers:
 
 ```bash
-make start-floci   # clean up and start the Floci container
-make deploy        # start Floci and deploy Terraform
-make audit         # run the security audit script
-make all           # start, deploy, and audit in one command
-make stop-floci    # stop and remove the Floci container
-make clean         # alias for stop-floci
+make start-floci      # clean up and start the Floci container
+make deploy           # start Floci and deploy Terraform
+make audit            # run the security audit script
+make build-sample-app # build the sample Flask Docker image
+make run-sample-app   # build and run the sample Flask container
+make all              # start Floci, build/run sample app, deploy, and audit
+make stop-floci       # stop and remove the Floci container
+make clean            # alias for stop-floci
 ```
 
 
@@ -340,12 +342,24 @@ From the repository root, run:
 docker build -t sample-app:latest ./app
 ```
 
+Or use the Makefile helper:
+
+```bash
+make build-sample-app
+```
+
 ### Run the container
 
 Start the application in the background and map port `5000`:
 
 ```bash
 docker run -d -p 5000:5000 --name sample-app sample-app:latest
+```
+
+Or use the Makefile helper, which rebuilds the image first and replaces any existing container:
+
+```bash
+make run-sample-app
 ```
 
 ### Test the endpoint

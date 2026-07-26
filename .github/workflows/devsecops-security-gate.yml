@@ -54,7 +54,7 @@ jobs:
     steps:
 
       # ========================================================
-      # CHECKOUT REPOSITORY
+      # CHECKOUT
       # ========================================================
 
       - name: Checkout repository
@@ -76,7 +76,7 @@ jobs:
           git remote add origin \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
-          echo "Fetching complete repository history..."
+          echo "Fetching repository..."
 
           git fetch \
             --no-tags \
@@ -84,30 +84,40 @@ jobs:
             origin \
             "+refs/heads/*:refs/remotes/origin/*"
 
-          echo "Checking out commit:"
-          echo "${GITHUB_SHA}"
+          echo "Checking out ${GITHUB_SHA}"
 
           git checkout \
             --force \
             "${GITHUB_SHA}"
 
-          # Remove token-bearing remote URL after checkout.
           git remote remove origin
 
           echo ""
           echo "Repository checkout completed."
 
-          echo ""
-          echo "Current commit:"
           git rev-parse HEAD
 
-          echo ""
-          echo "Git history:"
-          git rev-list --count HEAD
 
-          echo ""
-          echo "Repository contents:"
-          ls -la
+      # ========================================================
+      # INSTALL UNZIP
+      # ========================================================
+
+      - name: Install required system packages
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "Installing system dependencies"
+          echo "=========================================="
+
+          sudo apt-get update
+
+          sudo apt-get install \
+            --yes \
+            unzip \
+            curl \
+            jq
 
 
       # ========================================================
@@ -125,29 +135,78 @@ jobs:
           echo "Installing Terraform ${VERSION}"
           echo "=========================================="
 
+          WORK_DIR="$(mktemp -d)"
+
+          echo "Downloading Terraform..."
+
           curl \
             --fail \
             --silent \
             --show-error \
             --location \
             "https://releases.hashicorp.com/terraform/${VERSION}/terraform_${VERSION}_linux_amd64.zip" \
-            --output /tmp/terraform.zip
+            --output "${WORK_DIR}/terraform.zip"
 
-          rm -rf /tmp/terraform
-
-          mkdir -p /tmp/terraform
+          echo "Extracting Terraform..."
 
           unzip \
             -o \
-            /tmp/terraform.zip \
-            -d /tmp/terraform
+            "${WORK_DIR}/terraform.zip" \
+            -d "${WORK_DIR}"
+
+          echo "Installing Terraform to /usr/local/bin..."
 
           sudo install \
-            /tmp/terraform/terraform \
+            -m 0755 \
+            "${WORK_DIR}/terraform" \
             /usr/local/bin/terraform
 
           echo ""
-          echo "Terraform installed successfully:"
+          echo "Checking installed Terraform binary..."
+
+          ls -la /usr/local/bin/terraform
+
+          echo ""
+          echo "PATH:"
+          echo "${PATH}"
+
+          echo ""
+          echo "Terraform location:"
+          command -v terraform
+
+          echo ""
+          echo "Terraform version:"
+          /usr/local/bin/terraform version
+
+          echo ""
+          echo "Terraform installation successful."
+
+
+      # ========================================================
+      # VERIFY TERRAFORM
+      # ========================================================
+
+      - name: Verify Terraform
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "Terraform Verification"
+          echo "=========================================="
+
+          if [ ! -x /usr/local/bin/terraform ]; then
+            echo "ERROR: Terraform binary does not exist."
+            exit 1
+          fi
+
+          export PATH="/usr/local/bin:${PATH}"
+
+          echo "Terraform binary:"
+          command -v terraform
+
+          echo ""
+          echo "Terraform version:"
           terraform version
 
 
@@ -159,6 +218,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          export PATH="/usr/local/bin:${PATH}"
 
           echo "=========================================="
           echo "Environment"
@@ -178,7 +239,11 @@ jobs:
 
           echo ""
           echo "Terraform:"
-          terraform version
+          /usr/local/bin/terraform version
+
+          echo ""
+          echo "Terraform PATH:"
+          command -v terraform || true
 
           echo ""
           echo "Python:"
@@ -213,22 +278,20 @@ jobs:
             --output /tmp/gitleaks.tar.gz
 
           tar \
-            --extract \
-            --gzip \
-            --file /tmp/gitleaks.tar.gz \
-            --directory /tmp
+            -xzf \
+            /tmp/gitleaks.tar.gz \
+            -C /tmp
 
           sudo install \
+            -m 0755 \
             /tmp/gitleaks \
             /usr/local/bin/gitleaks
 
-          echo ""
-          echo "Gitleaks version:"
           gitleaks version
 
 
       # ========================================================
-      # GITLEAKS SECRET SCAN
+      # GITLEAKS SCAN
       # ========================================================
 
       - name: Run Gitleaks secret detection
@@ -269,17 +332,15 @@ jobs:
             --output /tmp/trivy.tar.gz
 
           tar \
-            --extract \
-            --gzip \
-            --file /tmp/trivy.tar.gz \
-            --directory /tmp
+            -xzf \
+            /tmp/trivy.tar.gz \
+            -C /tmp
 
           sudo install \
+            -m 0755 \
             /tmp/trivy \
             /usr/local/bin/trivy
 
-          echo ""
-          echo "Trivy version:"
           trivy --version
 
 
@@ -327,13 +388,11 @@ jobs:
             checkov \
             --break-system-packages
 
-          echo ""
-          echo "Checkov version:"
           checkov --version
 
 
       # ========================================================
-      # CHECKOV TERRAFORM SCAN
+      # CHECKOV SCAN
       # ========================================================
 
       - name: Run Checkov Terraform scan
@@ -362,9 +421,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "=========================================="
-          echo "Terraform Init"
-          echo "=========================================="
+          export PATH="/usr/local/bin:${PATH}"
 
           terraform init \
             -input=false
@@ -380,9 +437,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "=========================================="
-          echo "Terraform Validate"
-          echo "=========================================="
+          export PATH="/usr/local/bin:${PATH}"
 
           terraform validate
 
@@ -397,9 +452,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "=========================================="
-          echo "Terraform Plan"
-          echo "=========================================="
+          export PATH="/usr/local/bin:${PATH}"
 
           terraform plan \
             -input=false \
@@ -409,9 +462,6 @@ jobs:
             -json \
             tfplan.binary \
             > tfplan.json
-
-          echo ""
-          echo "Terraform plan generated successfully."
 
 
       # ========================================================
@@ -438,26 +488,21 @@ jobs:
             --output /tmp/opa
 
           sudo install \
+            -m 0755 \
             /tmp/opa \
             /usr/local/bin/opa
 
-          echo ""
-          echo "OPA version:"
           opa version
 
 
       # ========================================================
-      # OPA POLICY VALIDATION
+      # OPA CHECK
       # ========================================================
 
       - name: Validate OPA policies
         shell: bash
         run: |
           set -euo pipefail
-
-          echo "=========================================="
-          echo "OPA Policy Validation"
-          echo "=========================================="
 
           opa check \
             policies/opa
@@ -471,10 +516,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
-          echo "=========================================="
-          echo "OPA Terraform Policy"
-          echo "=========================================="
 
           opa eval \
             --fail \
@@ -493,15 +534,13 @@ jobs:
           set -euo pipefail
 
           echo "=========================================="
-          echo "Docker Build"
+          echo "Building sample application"
           echo "=========================================="
 
           docker build \
             --tag sample-app:latest \
             ./app
 
-          echo ""
-          echo "Built image:"
           docker images sample-app
 
 
@@ -527,7 +566,7 @@ jobs:
 
 
   # ============================================================
-  # LOCAL DEPLOYMENT TO FLOCI
+  # LOCAL DEPLOYMENT
   # ============================================================
 
   local-deployment:
@@ -542,7 +581,7 @@ jobs:
     steps:
 
       # ========================================================
-      # CHECKOUT REPOSITORY
+      # CHECKOUT
       # ========================================================
 
       - name: Checkout repository
@@ -564,8 +603,6 @@ jobs:
           git remote add origin \
             "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
-          echo "Fetching repository commit..."
-
           git fetch \
             --no-tags \
             --prune \
@@ -581,9 +618,25 @@ jobs:
           echo ""
           echo "Repository checkout completed."
 
-          echo ""
-          echo "Current commit:"
           git rev-parse HEAD
+
+
+      # ========================================================
+      # INSTALL SYSTEM PACKAGES
+      # ========================================================
+
+      - name: Install required system packages
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          sudo apt-get update
+
+          sudo apt-get install \
+            --yes \
+            unzip \
+            curl \
+            jq
 
 
       # ========================================================
@@ -601,30 +654,57 @@ jobs:
           echo "Installing Terraform ${VERSION}"
           echo "=========================================="
 
+          WORK_DIR="$(mktemp -d)"
+
           curl \
             --fail \
             --silent \
             --show-error \
             --location \
             "https://releases.hashicorp.com/terraform/${VERSION}/terraform_${VERSION}_linux_amd64.zip" \
-            --output /tmp/terraform.zip
-
-          rm -rf /tmp/terraform
-
-          mkdir -p /tmp/terraform
+            --output "${WORK_DIR}/terraform.zip"
 
           unzip \
             -o \
-            /tmp/terraform.zip \
-            -d /tmp/terraform
+            "${WORK_DIR}/terraform.zip" \
+            -d "${WORK_DIR}"
 
           sudo install \
-            /tmp/terraform/terraform \
+            -m 0755 \
+            "${WORK_DIR}/terraform" \
             /usr/local/bin/terraform
 
           echo ""
-          echo "Terraform installed successfully:"
-          terraform version
+          echo "Terraform:"
+          /usr/local/bin/terraform version
+
+          echo ""
+          echo "Terraform path:"
+          command -v terraform || true
+
+
+      # ========================================================
+      # VERIFY TERRAFORM
+      # ========================================================
+
+      - name: Verify Terraform
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          export PATH="/usr/local/bin:${PATH}"
+
+          if [ ! -x /usr/local/bin/terraform ]; then
+            echo "ERROR: Terraform was not installed."
+            exit 1
+          fi
+
+          echo "Terraform binary:"
+          ls -lh /usr/local/bin/terraform
+
+          echo ""
+          echo "Terraform version:"
+          /usr/local/bin/terraform version
 
 
       # ========================================================
@@ -636,10 +716,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "=========================================="
-          echo "Docker"
-          echo "=========================================="
-
           docker version
 
           echo ""
@@ -647,23 +723,7 @@ jobs:
 
 
       # ========================================================
-      # TERRAFORM CHECK
-      # ========================================================
-
-      - name: Check Terraform
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "=========================================="
-          echo "Terraform"
-          echo "=========================================="
-
-          terraform version
-
-
-      # ========================================================
-      # FLOCI IMAGE PULL
+      # FLOCI IMAGE
       # ========================================================
 
       - name: Pull Floci image
@@ -672,27 +732,19 @@ jobs:
           set -euo pipefail
 
           echo "=========================================="
-          echo "Floci Image"
+          echo "Pulling Floci"
           echo "=========================================="
-
-          echo "Image:"
-          echo "${FLOCI_IMAGE}"
 
           for attempt in 1 2 3 4 5; do
 
-            echo ""
             echo "Pull attempt ${attempt}/5..."
 
             if docker pull "${FLOCI_IMAGE}"; then
-
-              echo ""
               echo "Floci image pulled successfully."
-
               exit 0
-
             fi
 
-            echo "Floci pull failed."
+            echo "Pull failed."
 
             if [ "${attempt}" -lt 5 ]; then
               sleep $((attempt * 5))
@@ -700,7 +752,6 @@ jobs:
 
           done
 
-          echo ""
           echo "ERROR: Unable to pull Floci image."
 
           docker info
@@ -717,10 +768,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "=========================================="
-          echo "Starting Floci"
-          echo "=========================================="
-
           docker rm \
             --force \
             floci 2>/dev/null || true
@@ -732,11 +779,13 @@ jobs:
             "${FLOCI_IMAGE}"
 
           echo ""
-          echo "Floci container started."
+          echo "Floci started."
+
+          docker ps -a
 
 
       # ========================================================
-      # FLOCI STATUS
+      # FLOCI LOGS
       # ========================================================
 
       - name: Check Floci container
@@ -745,15 +794,13 @@ jobs:
           set -euo pipefail
 
           echo "=========================================="
-          echo "Docker Containers"
+          echo "Floci Container"
           echo "=========================================="
 
           docker ps -a
 
           echo ""
-          echo "=========================================="
-          echo "Floci Logs"
-          echo "=========================================="
+          echo "Floci logs:"
 
           docker logs floci || true
 
@@ -773,7 +820,7 @@ jobs:
 
           for attempt in {1..30}; do
 
-            echo "Health check attempt ${attempt}/30..."
+            echo "Health check ${attempt}/30..."
 
             if curl \
               --silent \
@@ -783,7 +830,6 @@ jobs:
               http://localhost:4566/ \
               >/dev/null 2>&1; then
 
-              echo ""
               echo "Floci is ready."
 
               exit 0
@@ -794,19 +840,11 @@ jobs:
 
           done
 
-          echo ""
-          echo "=========================================="
-          echo "ERROR: Floci failed to become ready"
-          echo "=========================================="
-
-          echo ""
-          echo "Container status:"
+          echo "ERROR: Floci did not become ready."
 
           docker ps -a
 
           echo ""
-          echo "Floci logs:"
-
           docker logs floci || true
 
           exit 1
@@ -828,9 +866,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "=========================================="
-          echo "Terraform Init"
-          echo "=========================================="
+          export PATH="/usr/local/bin:${PATH}"
 
           terraform init \
             -input=false
@@ -846,9 +882,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "=========================================="
-          echo "Terraform Validate"
-          echo "=========================================="
+          export PATH="/usr/local/bin:${PATH}"
 
           terraform validate
 
@@ -868,6 +902,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          export PATH="/usr/local/bin:${PATH}"
 
           echo "=========================================="
           echo "Terraform Apply"
@@ -901,16 +937,10 @@ jobs:
 
     steps:
 
-      # ========================================================
-      # SLACK NOTIFICATION
-      # ========================================================
-
       - name: Send Slack notification
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
-
         shell: bash
-
         run: |
           set -euo pipefail
 
@@ -936,4 +966,4 @@ jobs:
             --request POST \
             --header "Content-Type: application/json" \
             --data "$PAYLOAD" \
-            "$SLACK_WEBHOOK_URL"
+            "${SLACK_WEBHOOK_URL}"

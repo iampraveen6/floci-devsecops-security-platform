@@ -200,8 +200,8 @@ jobs:
           checkov \
             --directory ./terraform \
             --framework terraform \
-            --output cli \
-            --soft-fail false
+            --output cli
+        
 
       # =======================================================================
       # 9. Terraform Format Check

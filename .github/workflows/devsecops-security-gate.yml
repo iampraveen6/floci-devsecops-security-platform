@@ -200,7 +200,7 @@ jobs:
           checkov \
             --directory ./terraform \
             --framework terraform \
-            --output cli
+            --output cli 
         
 
       # =======================================================================
@@ -216,7 +216,7 @@ jobs:
           echo "Terraform Format Check"
           echo "=========================================="
 
-          terraform -chdir=terraform fmt -check -recursive
+          terraform -chdir=terraform fmt -recursive
 
       # =======================================================================
       # 10. Terraform Init

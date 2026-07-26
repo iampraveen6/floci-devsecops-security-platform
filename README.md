@@ -71,10 +71,12 @@ Ensure the following tools are installed on your system (WSL is recommended on W
 
 1.  **Start the Floci Container**:
 
-    Open a terminal and run the following command to start the Floci container in the background. This simulates the AWS environment locally.
+    Open a terminal and clean up any old Floci container, then start a new one in the background. This simulates the AWS environment locally.
 
     ```bash
-    docker run --rm -d -v /var/run/docker.sock:/var/run/docker.sock -p 4566:4566 -p 4510-4559:4510-4559 --name floci floci/floci:latest
+    docker kill floci 2>/dev/null || true
+    docker rm floci 2>/dev/null || true
+    docker run --rm -d -v /var/run/docker.sock:/var/run/docker.sock -p 4566:4566 --name floci floci/floci:latest
     ```
 
 2.  **Deploy Terraform Resources**:
@@ -205,15 +207,18 @@ docker rm sample-app
 
 ## One-Command Local Setup
 
-A `Makefile` is included to simplify the local Floci workflow:
+A `Makefile` is included to simplify the local Floci workflow. Common commands:
 
-- `make start-floci` — start the Floci container
-- `make deploy` — start Floci and run Terraform apply
-- `make audit` — run the security audit script
-- `make stop-floci` — stop and remove the container
-- `make all` — start, deploy, and audit in one command
+```bash
+make start-floci   # clean up and start the Floci container
+make deploy        # start Floci and deploy Terraform
+make audit         # run the security audit script
+make all           # start, deploy, and audit in one command
+make stop-floci    # stop and remove the Floci container
+make clean         # alias for stop-floci
+```
 
-Example:
+To set up the full environment and audit it in one go, run:
 
 ```bash
 make all

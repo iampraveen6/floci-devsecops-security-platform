@@ -126,16 +126,56 @@ Ensure the following tools are installed on your system (WSL is recommended on W
 
 ## Sample Application
 
-A minimal containerized Flask application is provided in `app/`. The CI pipeline builds the image and runs a Trivy container vulnerability scan.
+A minimal containerized Flask application is provided in `app/`. It exposes a `/health` endpoint and is built and scanned by the Trivy container vulnerability scan in the CI pipeline.
 
-To build and test it locally:
+### Prerequisites
+
+- Docker installed and running.
+
+### Build the Docker image
+
+From the repository root, run:
 
 ```bash
-docker build -t sample-app ./app
-docker run -p 5000:5000 sample-app
+docker build -t sample-app:latest ./app
 ```
 
-Then open `http://localhost:5000/health`.
+### Run the container
+
+Start the application in the background and map port `5000`:
+
+```bash
+docker run -d -p 5000:5000 --name sample-app sample-app:latest
+```
+
+### Test the endpoint
+
+Once the container is running, verify it with `curl`:
+
+```bash
+curl http://localhost:5000/health
+```
+
+Expected response:
+
+```json
+{"status":"ok"}
+```
+
+You can also open `http://localhost:5000/health` in your browser.
+
+### View logs
+
+```bash
+docker logs -f sample-app
+```
+
+### Stop and remove the container
+
+```bash
+docker stop sample-app
+docker rm sample-app
+```
 
 ## One-Command Local Setup
 

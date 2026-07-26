@@ -120,14 +120,15 @@ else
 fi
 echo
 
-# 4. Check AWS GuardDuty Detector Status
-echo -e "${YELLOW}4. Checking AWS GuardDuty Detector Status...${NC}"
-DETECTORS=$($AWS_CMD guardduty list-detectors --query 'DetectorIds' --output json 2>/dev/null)
+# 4. Check AWS Config Rule Status
+echo -e "${YELLOW}4. Checking AWS Config Rule Status...${NC}"
+CONFIG_RULES=$($AWS_CMD configservice describe-config-rules --query 'ConfigRules' --output json 2>/dev/null)
 
-if [ -n "$DETECTORS" ] && [ "$DETECTORS" != "[]" ] && [ "$DETECTORS" != "None" ]; then
-  echo -e "   ${GREEN}[PASS]${NC} GuardDuty detector(s) found: $DETECTORS."
+if [ -n "$CONFIG_RULES" ] && [ "$CONFIG_RULES" != "[]" ] && [ "$CONFIG_RULES" != "None" ]; then
+  echo -e "   ${GREEN}[PASS]${NC} AWS Config rule(s) found: $CONFIG_RULES."
 else
-  echo -e "   ${YELLOW}[INFO]${NC} GuardDuty detector not found (service not emulated by local Floci)."
+  echo -e "   ${RED}[FAIL]${NC} AWS Config rule not found."
+  FAIL_COUNT=$((FAIL_COUNT+1))
 fi
 echo
 

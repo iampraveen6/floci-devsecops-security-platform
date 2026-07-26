@@ -200,23 +200,12 @@ resource "aws_iam_policy" "secret_reader_policy" {
   })
 }
 
-# 5. AWS GuardDuty Threat Detection
-# GuardDuty is not emulated by the local Floci container. The resource is
-# declared for real AWS usage and is controlled by the enable_guardduty variable.
-variable "enable_guardduty" {
-  description = "Whether to create the GuardDuty detector (disabled by default for local Floci)"
-  type        = bool
-  default     = false
-}
+# 5. AWS Config Rule for S3 Encryption
+resource "aws_config_config_rule" "primary" {
+  name = "s3-bucket-server-side-encryption-enabled"
 
-resource "aws_guardduty_detector" "primary" {
-  count = var.enable_guardduty ? 1 : 0
-
-  enable = true
-
-  datasources {
-    s3_logs {
-      enable = true
-    }
+  source {
+    owner             = "AWS"
+    source_identifier = "S3_BUCKET_SERVER_SIDE_ENCRYPTION_ENABLED"
   }
 }

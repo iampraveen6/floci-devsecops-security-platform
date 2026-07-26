@@ -24,6 +24,6 @@ provider "aws" {
     secretsmanager = "http://localhost:4566"
     iam            = "http://localhost:4566"
     sts            = "http://localhost:4566"
-    guardduty      = "http://localhost:4566"
+    config         = "http://localhost:4566"
   }
 }

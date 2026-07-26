@@ -66,6 +66,19 @@ jobs:
         run: |
           opa eval --fail --input terraform/tfplan.json --data policies/opa/s3_kms_enforcement.rego 'data.terraform.analysis.deny'
 
+      # 5. Container Scan (Sample Application)
+      - name: Build sample app Docker image
+        run: docker build -t sample-app:latest ./app
+
+      - name: Run Trivy container vulnerability scan
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: 'image'
+          image-ref: 'sample-app:latest'
+          format: 'table'
+          exit-code: '0'
+          severity: 'CRITICAL,HIGH'
+
   local-deployment:
     name: Local Deployment to Floci
     runs-on: ubuntu-latest
@@ -105,3 +118,20 @@ jobs:
           AWS_ENDPOINT_URL_SECRETSMANAGER: http://localhost:4566
           AWS_ENDPOINT_URL_IAM: http://localhost:4566
           AWS_ENDPOINT_URL_STS: http://localhost:4566
+
+  notify-on-failure:
+    name: Slack Failure Notification
+    runs-on: ubuntu-latest
+    needs: [security-scans, local-deployment]
+    if: always() && failure()
+    steps:
+      - name: Send Slack notification
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+        run: |
+          if [ -n "$SLACK_WEBHOOK_URL" ]; then
+            curl -X POST -H 'Content-type: application/json' \
+              --data '{"text":"DevSecOps Security Gate failed for ${{ github.repository }}\nRun: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}"}' \
+              "$SLACK_WEBHOOK_URL"
+          fi
+        continue-on-error: true

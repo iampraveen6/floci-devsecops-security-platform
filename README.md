@@ -123,3 +123,36 @@ Ensure the following tools are installed on your system (WSL is recommended on W
                    Audit Report Complete
     =================================================
     ```
+
+## Sample Application
+
+A minimal containerized Flask application is provided in `app/`. The CI pipeline builds the image and runs a Trivy container vulnerability scan.
+
+To build and test it locally:
+
+```bash
+docker build -t sample-app ./app
+docker run -p 5000:5000 sample-app
+```
+
+Then open `http://localhost:5000/health`.
+
+## One-Command Local Setup
+
+A `Makefile` is included to simplify the local Floci workflow:
+
+- `make start-floci` — start the Floci container
+- `make deploy` — start Floci and run Terraform apply
+- `make audit` — run the security audit script
+- `make stop-floci` — stop and remove the container
+- `make all` — start, deploy, and audit in one command
+
+Example:
+
+```bash
+make all
+```
+
+## Slack Failure Notifications
+
+The pipeline includes a `notify-on-failure` job that sends a Slack message when any job fails. To enable it, add a repository secret named `SLACK_WEBHOOK_URL` under **Settings > Secrets and variables > Actions**.

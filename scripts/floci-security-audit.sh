@@ -10,6 +10,8 @@ BUCKET_NAME="floci-devsecops-audit-logs"
 SECRET_NAME="dev/database/credentials"
 POLICY_NAME="SecretReaderPolicy"
 
+FAIL_COUNT=0
+
 # --- Colors for Output ---
 GREEN='\033[0;32m'
 RED='\033[0;31m'
@@ -41,6 +43,7 @@ KEY_ID=$($AWS_CMD kms list-keys --query 'Keys[0].KeyId' --output text)
 
 if [ -z "$KEY_ID" ] || [ "$KEY_ID" == "None" ]; then
   echo -e "   ${RED}[FAIL]${NC} No KMS keys found."
+  FAIL_COUNT=$((FAIL_COUNT+1))
 else
   KEY_METADATA=$($AWS_CMD kms describe-key --key-id "$KEY_ID")
   KEY_STATE=$(echo "$KEY_METADATA" | jq -r '.KeyMetadata.KeyState')
@@ -50,12 +53,14 @@ else
     echo -e "   ${GREEN}[PASS]${NC} KMS Key ($KEY_ID) is enabled."
   else
     echo -e "   ${RED}[FAIL]${NC} KMS Key ($KEY_ID) is not enabled. State: $KEY_STATE."
+    FAIL_COUNT=$((FAIL_COUNT+1))
   fi
 
   if [ "$ROTATION_STATUS" == "true" ]; then
     echo -e "   ${GREEN}[PASS]${NC} KMS Key rotation is enabled."
   elif [ "$ROTATION_STATUS" == "false" ]; then
     echo -e "   ${RED}[FAIL]${NC} KMS Key rotation is not enabled."
+  FAIL_COUNT=$((FAIL_COUNT+1))
   else
     echo -e "   ${YELLOW}[INFO]${NC} KMS Key rotation status not reported by local Floci."
   fi
@@ -74,9 +79,11 @@ if $AWS_CMD s3api head-bucket --bucket "$BUCKET_NAME" &> /dev/null; then
     echo -e "   ${GREEN}[PASS]${NC} S3 bucket '$BUCKET_NAME' has all public access blocks enabled."
   else
     echo -e "   ${RED}[FAIL]${NC} S3 bucket '$BUCKET_NAME' has insecure public access settings."
+    FAIL_COUNT=$((FAIL_COUNT+1))
   fi
 else
     echo -e "   ${RED}[FAIL]${NC} S3 bucket '$BUCKET_NAME' not found."
+    FAIL_COUNT=$((FAIL_COUNT+1))
 fi
 echo
 
@@ -86,6 +93,7 @@ POLICY_ARN=$($AWS_CMD iam list-policies --query "Policies[?PolicyName=='$POLICY_
 
 if [ -z "$POLICY_ARN" ] || [ "$POLICY_ARN" == "None" ]; then
   echo -e "   ${RED}[FAIL]${NC} IAM policy '$POLICY_NAME' not found."
+  FAIL_COUNT=$((FAIL_COUNT+1))
 else
   POLICY_VERSION=$($AWS_CMD iam get-policy --policy-arn "$POLICY_ARN" --query 'Policy.DefaultVersionId' --output text)
   POLICY_DOC=$($AWS_CMD iam get-policy-version --policy-arn "$POLICY_ARN" --version-id "$POLICY_VERSION" --output json)
@@ -107,10 +115,27 @@ else
     echo -e "   ${GREEN}[PASS]${NC} IAM policy '$POLICY_NAME' correctly grants GetSecretValue to the specific secret."
   else
     echo -e "   ${RED}[FAIL]${NC} IAM policy '$POLICY_NAME' does not correctly scope GetSecretValue permissions."
+    FAIL_COUNT=$((FAIL_COUNT+1))
   fi
+fi
+echo
+
+# 4. Check AWS GuardDuty Detector Status
+echo -e "${YELLOW}4. Checking AWS GuardDuty Detector Status...${NC}"
+DETECTORS=$($AWS_CMD guardduty list-detectors --query 'DetectorIds' --output json 2>/dev/null)
+
+if [ -n "$DETECTORS" ] && [ "$DETECTORS" != "[]" ] && [ "$DETECTORS" != "None" ]; then
+  echo -e "   ${GREEN}[PASS]${NC} GuardDuty detector(s) found: $DETECTORS."
+else
+  echo -e "   ${YELLOW}[INFO]${NC} GuardDuty detector not found (service not emulated by local Floci)."
 fi
 echo
 
 echo "================================================="
 echo "               Audit Report Complete             "
 echo "================================================="
+
+if [ $FAIL_COUNT -gt 0 ]; then
+  echo -e "${RED}Audit completed with $FAIL_COUNT failure(s).${NC}"
+  exit 1
+fi

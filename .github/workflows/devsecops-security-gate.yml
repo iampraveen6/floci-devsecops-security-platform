@@ -41,6 +41,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 # -----------------------------------------------------------------------------
 # Security Scan Job
@@ -381,7 +382,94 @@ jobs:
           if-no-files-found: warn
 
       # =======================================================================
-      # 18. Security Summary
+      # 18. Build Sample Application Image
+      # =======================================================================
+
+      - name: Build sample-app image
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "Building sample-app image"
+          echo "=========================================="
+
+          docker build -t sample-app:latest ./app
+
+      # =======================================================================
+      # 19. Generate Syft SPDX SBOM
+      # =======================================================================
+
+      - name: Generate Syft SPDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: sample-app:latest
+          format: spdx-json
+          output-file: sbom.spdx.json
+          upload-artifact: false
+
+      # =======================================================================
+      # 20. Upload SPDX SBOM Artifact
+      # =======================================================================
+
+      - name: Upload SPDX SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: sbom.spdx.json
+          if-no-files-found: error
+
+      # =======================================================================
+      # 21. Generate Syft CycloneDX SBOM
+      # =======================================================================
+
+      - name: Generate Syft CycloneDX SBOM
+        uses: anchore/sbom-action@v0
+        with:
+          image: sample-app:latest
+          format: cyclonedx-json
+          output-file: sbom.cyclonedx.json
+          upload-artifact: false
+
+      # =======================================================================
+      # 22. Upload CycloneDX SBOM Artifact
+      # =======================================================================
+
+      - name: Upload CycloneDX SBOM artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-cyclonedx
+          path: sbom.cyclonedx.json
+          if-no-files-found: error
+
+      # =======================================================================
+      # 23. Install Cosign
+      # =======================================================================
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@v3
+
+      # =======================================================================
+      # 24. Sign and Verify SBOM with Cosign
+      # =======================================================================
+
+      - name: Sign and verify SBOM
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "Cosign Sign and Verify SBOM"
+          echo "=========================================="
+
+          export COSIGN_PASSWORD=""
+
+          cosign generate-key-pair
+          cosign sign-blob --yes --key cosign.key --bundle sbom.spdx.json.sigstore.json sbom.spdx.json
+          cosign verify-blob --bundle sbom.spdx.json.sigstore.json --key cosign.pub sbom.spdx.json
+
+      # =======================================================================
+      # 25. Security Summary
       # =======================================================================
 
       - name: Security scan summary

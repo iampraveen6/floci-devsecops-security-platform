@@ -307,13 +307,14 @@ Ensure the following tools are installed on your system (WSL is recommended on W
 
 ## Security Audit
 
-`scripts/floci-security-audit.sh` is the post-deploy compliance check. It performs three checks against `http://localhost:4566`:
+`scripts/floci-security-audit.sh` is the post-deploy compliance check. It performs four checks against `http://localhost:4566`:
 
 1. **KMS Key Status** — Verifies the first KMS key is `Enabled` and that key rotation is enabled.
 2. **S3 Public Access Block** — Confirms `floci-devsecops-audit-logs` has `BlockPublicAcls`, `BlockPublicPolicy`, and `RestrictPublicBuckets` set to `true`.
 3. **IAM Secret Retrieval** — Validates `SecretReaderPolicy` grants `secretsmanager:GetSecretValue` scoped to the exact secret ARN (`dev/database/credentials`).
+4. **GuardDuty Detector Status** — Lists GuardDuty detectors. Because Floci does not emulate GuardDuty, this check reports `[INFO]` locally and does not fail the audit.
 
-The script exits with `0` regardless of individual findings (it reports `PASS`/`FAIL` to the console) so it can be used for demonstration and reporting.
+The script maintains a `FAIL_COUNT` and exits with `1` if `FAIL_COUNT > 1`; otherwise it exits with `0`.
 
 
 ## Sample Application
@@ -516,3 +517,74 @@ Use these points when presenting the repository:
 ## Notifications
 
 The pipeline includes a `notify-on-failure` job that sends a Slack message when any job fails. To enable it, add a repository secret named `SLACK_WEBHOOK_URL` under **Settings > Secrets and variables > Actions**.
+
+
+## Command Reference
+
+Useful commands for local development and validation.
+
+### Validation & Syntax
+
+```bash
+# Validate Terraform configuration
+terraform -chdir=terraform validate
+
+# Check audit script syntax
+bash -n scripts/floci-security-audit.sh
+
+# Validate GitHub Actions workflow YAML
+python3 -c "import yaml; yaml.safe_load(open('.github/workflows/devsecops-security-gate.yml'))"
+```
+
+### Full Local Workflow
+
+```bash
+make all
+```
+
+### Makefile Helpers
+
+```bash
+make start-floci      # start the Floci container
+make stop-floci       # stop the Floci container
+make clean            # alias for stop-floci
+make deploy           # start Floci and run Terraform apply
+make audit            # run the local security audit
+make build-sample-app # build the sample Flask Docker image
+make run-sample-app   # build and run the sample Flask container
+```
+
+### Manual Terraform (with optional GuardDuty)
+
+```bash
+cd terraform
+terraform init
+terraform validate
+terraform apply -auto-approve                           # local Floci; GuardDuty disabled
+terraform apply -auto-approve -var="enable_guardduty=true"  # enable GuardDuty (real AWS)
+```
+
+### Manual AWS CLI Against Floci
+
+```bash
+aws --endpoint-url=http://localhost:4566 --region us-east-1 kms list-keys
+aws --endpoint-url=http://localhost:4566 --region us-east-1 s3api list-buckets
+aws --endpoint-url=http://localhost:4566 --region us-east-1 iam list-policies
+aws --endpoint-url=http://localhost:4566 --region us-east-1 guardduty list-detectors
+```
+
+### Sample Application
+
+```bash
+curl http://localhost:5000/health
+docker logs -f sample-app
+```
+
+### Security Audit
+
+```bash
+chmod +x scripts/floci-security-audit.sh
+./scripts/floci-security-audit.sh
+```
+
+The audit exits with a non-zero status if any compliance check fails.

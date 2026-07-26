@@ -14,7 +14,7 @@ stop-floci:
 	docker rm floci || true
 
 deploy: start-floci
-	cd terraform && terraform init && terraform apply -auto-approve
+	cd terraform && if [ -d .terraform/providers-mirror ]; then terraform init -plugin-dir=.terraform/providers-mirror; else terraform init; fi && terraform apply -auto-approve
 
 audit:
 	./scripts/floci-security-audit.sh

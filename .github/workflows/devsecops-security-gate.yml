@@ -99,7 +99,7 @@ jobs:
 
 
       # ========================================================
-      # INSTALL UNZIP
+      # INSTALL SYSTEM PACKAGES
       # ========================================================
 
       - name: Install required system packages
@@ -137,8 +137,6 @@ jobs:
 
           WORK_DIR="$(mktemp -d)"
 
-          echo "Downloading Terraform..."
-
           curl \
             --fail \
             --silent \
@@ -147,14 +145,10 @@ jobs:
             "https://releases.hashicorp.com/terraform/${VERSION}/terraform_${VERSION}_linux_amd64.zip" \
             --output "${WORK_DIR}/terraform.zip"
 
-          echo "Extracting Terraform..."
-
           unzip \
             -o \
             "${WORK_DIR}/terraform.zip" \
             -d "${WORK_DIR}"
-
-          echo "Installing Terraform to /usr/local/bin..."
 
           sudo install \
             -m 0755 \
@@ -162,24 +156,8 @@ jobs:
             /usr/local/bin/terraform
 
           echo ""
-          echo "Checking installed Terraform binary..."
-
-          ls -la /usr/local/bin/terraform
-
-          echo ""
-          echo "PATH:"
-          echo "${PATH}"
-
-          echo ""
-          echo "Terraform location:"
-          command -v terraform
-
-          echo ""
-          echo "Terraform version:"
+          echo "Terraform:"
           /usr/local/bin/terraform version
-
-          echo ""
-          echo "Terraform installation successful."
 
 
       # ========================================================
@@ -191,19 +169,15 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "=========================================="
-          echo "Terraform Verification"
-          echo "=========================================="
+          export PATH="/usr/local/bin:${PATH}"
 
           if [ ! -x /usr/local/bin/terraform ]; then
-            echo "ERROR: Terraform binary does not exist."
+            echo "ERROR: Terraform was not installed."
             exit 1
           fi
 
-          export PATH="/usr/local/bin:${PATH}"
-
           echo "Terraform binary:"
-          command -v terraform
+          ls -lh /usr/local/bin/terraform
 
           echo ""
           echo "Terraform version:"
@@ -239,11 +213,7 @@ jobs:
 
           echo ""
           echo "Terraform:"
-          /usr/local/bin/terraform version
-
-          echo ""
-          echo "Terraform PATH:"
-          command -v terraform || true
+          terraform version
 
           echo ""
           echo "Python:"
@@ -287,11 +257,12 @@ jobs:
             /tmp/gitleaks \
             /usr/local/bin/gitleaks
 
+          echo ""
           gitleaks version
 
 
       # ========================================================
-      # GITLEAKS SCAN
+      # GITLEAKS SECRET SCAN
       # ========================================================
 
       - name: Run Gitleaks secret detection
@@ -341,6 +312,8 @@ jobs:
             /tmp/trivy \
             /usr/local/bin/trivy
 
+          echo ""
+          echo "Trivy version:"
           trivy --version
 
 
@@ -359,7 +332,6 @@ jobs:
 
           trivy config \
             --severity HIGH,CRITICAL \
-            --ignore-unfixed \
             --exit-code 1 \
             --format table \
             .
@@ -388,11 +360,13 @@ jobs:
             checkov \
             --break-system-packages
 
+          echo ""
+          echo "Checkov version:"
           checkov --version
 
 
       # ========================================================
-      # CHECKOV SCAN
+      # CHECKOV TERRAFORM SCAN
       # ========================================================
 
       - name: Run Checkov Terraform scan
@@ -423,6 +397,10 @@ jobs:
 
           export PATH="/usr/local/bin:${PATH}"
 
+          echo "=========================================="
+          echo "Terraform Init"
+          echo "=========================================="
+
           terraform init \
             -input=false
 
@@ -439,6 +417,10 @@ jobs:
 
           export PATH="/usr/local/bin:${PATH}"
 
+          echo "=========================================="
+          echo "Terraform Validate"
+          echo "=========================================="
+
           terraform validate
 
 
@@ -454,6 +436,10 @@ jobs:
 
           export PATH="/usr/local/bin:${PATH}"
 
+          echo "=========================================="
+          echo "Terraform Plan"
+          echo "=========================================="
+
           terraform plan \
             -input=false \
             -out=tfplan.binary
@@ -462,6 +448,9 @@ jobs:
             -json \
             tfplan.binary \
             > tfplan.json
+
+          echo ""
+          echo "Terraform plan generated successfully."
 
 
       # ========================================================
@@ -492,17 +481,23 @@ jobs:
             /tmp/opa \
             /usr/local/bin/opa
 
+          echo ""
+          echo "OPA version:"
           opa version
 
 
       # ========================================================
-      # OPA CHECK
+      # OPA POLICY VALIDATION
       # ========================================================
 
       - name: Validate OPA policies
         shell: bash
         run: |
           set -euo pipefail
+
+          echo "=========================================="
+          echo "OPA Policy Validation"
+          echo "=========================================="
 
           opa check \
             policies/opa
@@ -516,6 +511,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          echo "=========================================="
+          echo "OPA Terraform Policy"
+          echo "=========================================="
 
           opa eval \
             --fail \
@@ -534,13 +533,15 @@ jobs:
           set -euo pipefail
 
           echo "=========================================="
-          echo "Building sample application"
+          echo "Docker Build"
           echo "=========================================="
 
           docker build \
             --tag sample-app:latest \
             ./app
 
+          echo ""
+          echo "Built image:"
           docker images sample-app
 
 
@@ -566,7 +567,7 @@ jobs:
 
 
   # ============================================================
-  # LOCAL DEPLOYMENT
+  # LOCAL DEPLOYMENT TO FLOCI
   # ============================================================
 
   local-deployment:
@@ -678,10 +679,6 @@ jobs:
           echo "Terraform:"
           /usr/local/bin/terraform version
 
-          echo ""
-          echo "Terraform path:"
-          command -v terraform || true
-
 
       # ========================================================
       # VERIFY TERRAFORM
@@ -704,7 +701,7 @@ jobs:
 
           echo ""
           echo "Terraform version:"
-          /usr/local/bin/terraform version
+          terraform version
 
 
       # ========================================================
@@ -715,6 +712,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          echo "=========================================="
+          echo "Docker"
+          echo "=========================================="
 
           docker version
 
@@ -767,6 +768,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
+          echo "=========================================="
+          echo "Starting Floci"
+          echo "=========================================="
 
           docker rm \
             --force \
@@ -868,6 +873,10 @@ jobs:
 
           export PATH="/usr/local/bin:${PATH}"
 
+          echo "=========================================="
+          echo "Terraform Init"
+          echo "=========================================="
+
           terraform init \
             -input=false
 
@@ -883,6 +892,10 @@ jobs:
           set -euo pipefail
 
           export PATH="/usr/local/bin:${PATH}"
+
+          echo "=========================================="
+          echo "Terraform Validate"
+          echo "=========================================="
 
           terraform validate
 

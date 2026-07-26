@@ -11,17 +11,13 @@ permissions:
   contents: read
 
 env:
-  TF_IN_AUTOMATION: "true"
-
   AWS_DEFAULT_REGION: us-east-1
   AWS_REGION: us-east-1
+  TF_IN_AUTOMATION: "true"
 
   TERRAFORM_VERSION: "1.12.2"
-  GITLEAKS_VERSION: "8.24.2"
-  TRIVY_VERSION: "0.70.0"
-  OPA_VERSION: "1.17.0"
-
   FLOCI_IMAGE: "floci/floci:latest"
+  TRIVY_IMAGE: "aquasec/trivy:0.70.0"
 
 
 jobs:
@@ -38,112 +34,43 @@ jobs:
     steps:
 
       # ========================================================
-      # CHECKOUT REPOSITORY
+      # CHECKOUT
       # ========================================================
 
       - name: Checkout repository
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-
-          echo "=========================================="
-          echo "Initializing repository"
-          echo "=========================================="
-
-          git init .
-
-          git config user.name "github-actions"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git remote add origin \
-            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-
-          git fetch \
-            --no-tags \
-            --depth=1 \
-            origin \
-            "${GITHUB_SHA}"
-
-          git checkout --force FETCH_HEAD
-
-          git remote remove origin
-
-          echo ""
-          echo "Repository checkout completed."
-
-          git rev-parse HEAD
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
 
       # ========================================================
-      # VERIFY WORKFLOW CONTENT
+      # ENVIRONMENT
       # ========================================================
 
-      - name: Verify workflow configuration
+      - name: Check environment
         shell: bash
         run: |
           set -euo pipefail
 
           echo "=========================================="
-          echo "Workflow Configuration Verification"
+          echo "Environment"
           echo "=========================================="
 
-          WORKFLOW_FILE=".github/workflows/devsecops-security-gate.yml"
-
-          if [ ! -f "$WORKFLOW_FILE" ]; then
-            echo "ERROR: Workflow file not found."
-            exit 1
-          fi
+          echo ""
+          echo "Runner:"
+          uname -a
 
           echo ""
-          echo "Workflow file:"
-          echo "$WORKFLOW_FILE"
+          echo "Git:"
+          git --version
 
           echo ""
-          echo "Current commit:"
-          git rev-parse HEAD
+          echo "Docker:"
+          docker --version
 
           echo ""
-          echo "Trivy references in workflow:"
-
-          grep -n -E "trivy|ignore-unfixed" "$WORKFLOW_FILE" || true
-
-          echo ""
-          echo "Checking for invalid --ignore-unfixed usage..."
-
-          if grep -n -B5 -A5 "trivy config" "$WORKFLOW_FILE" | grep -q -- "--ignore-unfixed"; then
-            echo ""
-            echo "ERROR: --ignore-unfixed is being used with trivy config."
-            exit 1
-          fi
-
-          echo ""
-          echo "Workflow configuration verification passed."
-
-
-      # ========================================================
-      # SYSTEM DEPENDENCIES
-      # ========================================================
-
-      - name: Install system dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "=========================================="
-          echo "Installing system dependencies"
-          echo "=========================================="
-
-          sudo apt-get update
-
-          sudo apt-get install \
-            --yes \
-            curl \
-            unzip \
-            jq \
-            tar \
-            gzip
+          echo "Docker info:"
+          docker info
 
 
       # ========================================================
@@ -155,13 +82,11 @@ jobs:
         run: |
           set -euo pipefail
 
+          echo "=========================================="
+          echo "Installing Terraform"
+          echo "=========================================="
+
           VERSION="${TERRAFORM_VERSION}"
-
-          echo "=========================================="
-          echo "Installing Terraform ${VERSION}"
-          echo "=========================================="
-
-          TEMP_DIR="$(mktemp -d)"
 
           curl \
             --fail \
@@ -169,18 +94,19 @@ jobs:
             --show-error \
             --location \
             "https://releases.hashicorp.com/terraform/${VERSION}/terraform_${VERSION}_linux_amd64.zip" \
-            --output "${TEMP_DIR}/terraform.zip"
+            --output /tmp/terraform.zip
 
           unzip \
             -o \
-            "${TEMP_DIR}/terraform.zip" \
-            -d "${TEMP_DIR}"
+            /tmp/terraform.zip \
+            -d /tmp/terraform
 
           sudo install \
             -m 0755 \
-            "${TEMP_DIR}/terraform" \
+            /tmp/terraform/terraform \
             /usr/local/bin/terraform
 
+          echo ""
           terraform version
 
 
@@ -193,11 +119,11 @@ jobs:
         run: |
           set -euo pipefail
 
-          VERSION="${GITLEAKS_VERSION}"
+          echo "=========================================="
+          echo "Installing Gitleaks"
+          echo "=========================================="
 
-          echo "=========================================="
-          echo "Installing Gitleaks ${VERSION}"
-          echo "=========================================="
+          VERSION="8.24.2"
 
           curl \
             --fail \
@@ -218,43 +144,6 @@ jobs:
             /usr/local/bin/gitleaks
 
           gitleaks version
-
-
-      # ========================================================
-      # TRIVY
-      # ========================================================
-
-      - name: Install Trivy
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          VERSION="${TRIVY_VERSION}"
-
-          echo "=========================================="
-          echo "Installing Trivy ${VERSION}"
-          echo "=========================================="
-
-          curl \
-            --fail \
-            --silent \
-            --show-error \
-            --location \
-            "https://github.com/aquasecurity/trivy/releases/download/v${VERSION}/trivy_${VERSION}_Linux-64bit.tar.gz" \
-            --output /tmp/trivy.tar.gz
-
-          tar \
-            -xzf \
-            /tmp/trivy.tar.gz \
-            -C /tmp
-
-          sudo install \
-            -m 0755 \
-            /tmp/trivy \
-            /usr/local/bin/trivy
-
-          echo ""
-          trivy --version
 
 
       # ========================================================
@@ -284,84 +173,28 @@ jobs:
 
 
       # ========================================================
-      # OPA
+      # VERIFY TRIVY IMAGE
       # ========================================================
 
-      - name: Install OPA
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          VERSION="${OPA_VERSION}"
-
-          echo "=========================================="
-          echo "Installing OPA ${VERSION}"
-          echo "=========================================="
-
-          curl \
-            --fail \
-            --silent \
-            --show-error \
-            --location \
-            "https://openpolicyagent.org/downloads/v${VERSION}/opa_linux_amd64_static" \
-            --output /tmp/opa
-
-          sudo install \
-            -m 0755 \
-            /tmp/opa \
-            /usr/local/bin/opa
-
-          opa version
-
-
-      # ========================================================
-      # ENVIRONMENT
-      # ========================================================
-
-      - name: Check environment
+      - name: Pull Trivy image
         shell: bash
         run: |
           set -euo pipefail
 
           echo "=========================================="
-          echo "Environment"
+          echo "Pulling Trivy"
           echo "=========================================="
 
-          echo ""
-          echo "Runner:"
-          uname -a
+          docker pull "${TRIVY_IMAGE}"
 
           echo ""
-          echo "Git:"
-          git --version
-
-          echo ""
-          echo "Docker:"
-          docker --version
-
-          echo ""
-          echo "Terraform:"
-          terraform version
-
-          echo ""
-          echo "Gitleaks:"
-          gitleaks version
-
-          echo ""
-          echo "Trivy:"
-          trivy --version
-
-          echo ""
-          echo "Checkov:"
-          checkov --version
-
-          echo ""
-          echo "OPA:"
-          opa version
+          echo "Trivy image:"
+          docker image inspect "${TRIVY_IMAGE}" \
+            --format '{{.RepoTags}}'
 
 
       # ========================================================
-      # GITLEAKS
+      # GITLEAKS SCAN
       # ========================================================
 
       - name: Run Gitleaks secret detection
@@ -373,16 +206,17 @@ jobs:
           echo "Gitleaks Secret Detection"
           echo "=========================================="
 
-          gitleaks git \
+          gitleaks detect \
+            --source . \
             --redact \
             --verbose
 
 
       # ========================================================
-      # TRIVY IaC
+      # TRIVY IaC SCAN
       #
       # IMPORTANT:
-      # DO NOT USE --ignore-unfixed HERE.
+      # This command contains NO --ignore-unfixed.
       # ========================================================
 
       - name: Run Trivy IaC scan
@@ -394,21 +228,27 @@ jobs:
           echo "Trivy IaC Security Scan"
           echo "=========================================="
 
+          echo ""
+          echo "Trivy image:"
+          echo "${TRIVY_IMAGE}"
+
+          echo ""
           echo "Trivy version:"
-          trivy --version
+          docker run --rm \
+            "${TRIVY_IMAGE}" \
+            --version
 
           echo ""
-          echo "Running:"
-          echo "trivy config --severity HIGH,CRITICAL --exit-code 1 --format table ."
+          echo "Scanning repository configuration..."
 
-          echo ""
-          echo "Scanning Terraform and configuration files..."
-
-          trivy config \
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/repo:ro" \
+            "${TRIVY_IMAGE}" \
+            config \
             --severity HIGH,CRITICAL \
             --exit-code 1 \
             --format table \
-            .
+            /repo
 
 
       # ========================================================
@@ -423,6 +263,11 @@ jobs:
           echo "=========================================="
           echo "Checkov Terraform Security Scan"
           echo "=========================================="
+
+          if [ ! -d "./terraform" ]; then
+            echo "ERROR: terraform directory does not exist."
+            exit 1
+          fi
 
           checkov \
             --directory ./terraform \
@@ -491,6 +336,37 @@ jobs:
 
 
       # ========================================================
+      # OPA INSTALL
+      # ========================================================
+
+      - name: Install OPA
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "Installing OPA"
+          echo "=========================================="
+
+          VERSION="1.17.0"
+
+          curl \
+            --fail \
+            --silent \
+            --show-error \
+            --location \
+            "https://openpolicyagent.org/downloads/v${VERSION}/opa_linux_amd64_static" \
+            --output /tmp/opa
+
+          sudo install \
+            -m 0755 \
+            /tmp/opa \
+            /usr/local/bin/opa
+
+          opa version
+
+
+      # ========================================================
       # OPA VALIDATION
       # ========================================================
 
@@ -502,6 +378,11 @@ jobs:
           echo "=========================================="
           echo "OPA Policy Validation"
           echo "=========================================="
+
+          if [ ! -d "./policies/opa" ]; then
+            echo "ERROR: policies/opa directory does not exist."
+            exit 1
+          fi
 
           opa check \
             policies/opa
@@ -520,6 +401,16 @@ jobs:
           echo "OPA Terraform Policy"
           echo "=========================================="
 
+          if [ ! -f "./terraform/tfplan.json" ]; then
+            echo "ERROR: terraform/tfplan.json does not exist."
+            exit 1
+          fi
+
+          if [ ! -f "./policies/opa/s3_kms_enforcement.rego" ]; then
+            echo "ERROR: OPA policy file does not exist."
+            exit 1
+          fi
+
           opa eval \
             --fail \
             --input terraform/tfplan.json \
@@ -528,7 +419,7 @@ jobs:
 
 
       # ========================================================
-      # BUILD APPLICATION
+      # BUILD SAMPLE APPLICATION
       # ========================================================
 
       - name: Build sample application
@@ -537,20 +428,26 @@ jobs:
           set -euo pipefail
 
           echo "=========================================="
-          echo "Building sample application"
+          echo "Build Sample Application"
           echo "=========================================="
+
+          if [ ! -d "./app" ]; then
+            echo "ERROR: app directory does not exist."
+            exit 1
+          fi
 
           docker build \
             --tag sample-app:latest \
             ./app
 
-          docker images sample-app:latest
-
 
       # ========================================================
-      # TRIVY IMAGE
+      # TRIVY CONTAINER SCAN
       #
-      # --ignore-unfixed IS VALID HERE.
+      # IMPORTANT:
+      # No --ignore-unfixed here either.
+      # This keeps the pipeline compatible with the exact
+      # Trivy version being used.
       # ========================================================
 
       - name: Run Trivy container vulnerability scan
@@ -562,11 +459,12 @@ jobs:
           echo "Trivy Container Vulnerability Scan"
           echo "=========================================="
 
-          echo "Running image vulnerability scan..."
-
-          trivy image \
+          docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "${HOME}/.cache/trivy:/root/.cache/trivy" \
+            "${TRIVY_IMAGE}" \
+            image \
             --severity HIGH,CRITICAL \
-            --ignore-unfixed \
             --exit-code 1 \
             --format table \
             sample-app:latest
@@ -592,61 +490,13 @@ jobs:
       # ========================================================
 
       - name: Checkout repository
-        shell: bash
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-
-          echo "=========================================="
-          echo "Initializing repository"
-          echo "=========================================="
-
-          git init .
-
-          git config user.name "github-actions"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
-          git remote add origin \
-            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
-
-          git fetch \
-            --no-tags \
-            --depth=1 \
-            origin \
-            "${GITHUB_SHA}"
-
-          git checkout \
-            --force \
-            FETCH_HEAD
-
-          git remote remove origin
-
-          git rev-parse HEAD
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
 
 
       # ========================================================
-      # DEPENDENCIES
-      # ========================================================
-
-      - name: Install dependencies
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          sudo apt-get update
-
-          sudo apt-get install \
-            --yes \
-            curl \
-            unzip \
-            jq \
-            tar \
-            gzip
-
-
-      # ========================================================
-      # TERRAFORM
+      # INSTALL TERRAFORM
       # ========================================================
 
       - name: Install Terraform
@@ -656,24 +506,22 @@ jobs:
 
           VERSION="${TERRAFORM_VERSION}"
 
-          TEMP_DIR="$(mktemp -d)"
-
           curl \
             --fail \
             --silent \
             --show-error \
             --location \
             "https://releases.hashicorp.com/terraform/${VERSION}/terraform_${VERSION}_linux_amd64.zip" \
-            --output "${TEMP_DIR}/terraform.zip"
+            --output /tmp/terraform.zip
 
           unzip \
             -o \
-            "${TEMP_DIR}/terraform.zip" \
-            -d "${TEMP_DIR}"
+            /tmp/terraform.zip \
+            -d /tmp/terraform
 
           sudo install \
             -m 0755 \
-            "${TEMP_DIR}/terraform" \
+            /tmp/terraform/terraform \
             /usr/local/bin/terraform
 
           terraform version
@@ -692,7 +540,7 @@ jobs:
 
 
       # ========================================================
-      # FLOCI
+      # PULL FLOCI
       # ========================================================
 
       - name: Pull Floci
@@ -709,6 +557,7 @@ jobs:
             echo "Pull attempt ${attempt}/5"
 
             if docker pull "${FLOCI_IMAGE}"; then
+              echo "Floci image successfully pulled."
               exit 0
             fi
 
@@ -716,7 +565,7 @@ jobs:
 
           done
 
-          echo "Failed to pull Floci."
+          echo "ERROR: Unable to pull Floci image."
 
           exit 1
 
@@ -730,9 +579,14 @@ jobs:
         run: |
           set -euo pipefail
 
+          echo "=========================================="
+          echo "Starting Floci"
+          echo "=========================================="
+
           docker rm \
             --force \
-            floci 2>/dev/null || true
+            floci \
+            2>/dev/null || true
 
           docker run \
             --detach \
@@ -778,14 +632,16 @@ jobs:
 
           done
 
+          echo ""
           echo "ERROR: Floci did not become ready."
 
+          echo ""
+          echo "Docker containers:"
           docker ps -a
 
           echo ""
           echo "Floci logs:"
-
-          docker logs floci || true
+          docker logs floci 2>&1 || true
 
           exit 1
 
@@ -869,7 +725,7 @@ jobs:
 
 
   # ============================================================
-  # FAILURE NOTIFICATION
+  # SLACK FAILURE NOTIFICATION
   # ============================================================
 
   notify-on-failure:

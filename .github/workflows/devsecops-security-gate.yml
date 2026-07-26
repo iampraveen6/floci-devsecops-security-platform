@@ -1,41 +1,26 @@
-# GitHub Actions Workflow: DevSecOps Security Gate
-#
-# Phase 1:
-#   1. Gitleaks secret detection
-#   2. Trivy IaC misconfiguration scan
-#   3. Checkov Terraform policy scan
-#   4. Terraform init / validate / plan
-#   5. OPA/Rego policy evaluation
-#   6. Floci local AWS emulation
-#   7. Terraform apply against Floci
-#
-# Container scanning and Slack notification will be added
-# only after this baseline pipeline is green.
-
 name: DevSecOps Security Gate
 
 on:
   pull_request:
     branches:
       - main
-
+  push:
+    branches:
+      - main
   workflow_dispatch:
 
-# Minimum permissions required by this workflow.
 permissions:
   contents: read
-  security-events: write
-  pull-requests: read
 
-# Prevent multiple runs for the same PR/branch from piling up.
-concurrency:
-  group: devsecops-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+env:
+  TF_WORKING_DIR: ./terraform
+  FLOCI_IMAGE: floci/floci:latest
+  TRIVY_SEVERITY: HIGH,CRITICAL
 
 jobs:
 
   # ============================================================
-  # JOB 1: SECURITY SCANS
+  # STAGE 1 - SECURITY SCANNING
   # ============================================================
   security-scans:
     name: Security Scans
@@ -43,224 +28,532 @@ jobs:
 
     steps:
 
-      # ----------------------------------------------------------
+      # --------------------------------------------------------
       # Checkout
-      # ----------------------------------------------------------
-      - name: Checkout code
+      # --------------------------------------------------------
+      - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
 
-      # ----------------------------------------------------------
+      # --------------------------------------------------------
       # Environment
-      # ----------------------------------------------------------
+      # --------------------------------------------------------
       - name: Check environment
         shell: bash
         run: |
           set -euo pipefail
 
           echo "=========================================="
-          echo "DevSecOps Security Gate"
           echo "Environment"
           echo "=========================================="
 
-          echo ""
           echo "Runner:"
           uname -a
 
-          echo ""
+          echo
           echo "Git:"
           git --version
 
-          echo ""
+          echo
           echo "Docker:"
           docker --version
 
-          echo ""
-          echo "Repository:"
-          echo "${GITHUB_REPOSITORY}"
-
-          echo ""
-          echo "Branch / Ref:"
-          echo "${GITHUB_REF}"
-
-      # ==========================================================
-      # 1. GITLEAKS
-      # ==========================================================
-      - name: Run Gitleaks secret detection
-        uses: gitleaks/gitleaks-action@v2
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      # ==========================================================
-      # 2. TRIVY IaC
-      # ==========================================================
-      #
-      # IMPORTANT:
-      # `ignore-unfixed` is passed to the GitHub Action.
-      #
-      # Do NOT convert this into:
-      #
-      # trivy config . --ignore-unfixed
-      #
-      # because the current Trivy config scanner does not accept
-      # that CLI flag.
-      #
-      # ==========================================================
-      - name: Run Trivy vulnerability scanner in IaC mode
-        uses: aquasecurity/trivy-action@master
-        with:
-          scan-type: config
-          scan-ref: .
-          format: table
-          exit-code: 1
-          ignore-unfixed: true
-          severity: CRITICAL,HIGH
-
-      # ==========================================================
-      # 3. CHECKOV
-      # ==========================================================
-      - name: Run Checkov Terraform scan
-        uses: bridgecrewio/checkov-action@master
-        with:
-          directory: ./terraform
-          framework: terraform
-          output_format: cli
-          soft_fail: false
-
-      # ==========================================================
-      # 4. TERRAFORM
-      # ==========================================================
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-
-      - name: Terraform version
+      # --------------------------------------------------------
+      # Install Gitleaks
+      # --------------------------------------------------------
+      - name: Install Gitleaks
         shell: bash
         run: |
           set -euo pipefail
+
+          GITLEAKS_VERSION="8.28.0"
+
+          curl -sSfL \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${GITLEAKS_VERSION}/gitleaks_${GITLEAKS_VERSION}_linux_x64.tar.gz" \
+            -o /tmp/gitleaks.tar.gz
+
+          tar -xzf /tmp/gitleaks.tar.gz -C /tmp
+
+          sudo install /tmp/gitleaks /usr/local/bin/gitleaks
+
+          gitleaks version
+
+      # --------------------------------------------------------
+      # Gitleaks
+      # --------------------------------------------------------
+      - name: Run Gitleaks secret detection
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "Gitleaks Secret Detection"
+          echo "=========================================="
+
+          gitleaks detect \
+            --source . \
+            --redact \
+            --verbose
+
+      # --------------------------------------------------------
+      # Install Trivy
+      # --------------------------------------------------------
+      - name: Install Trivy
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TRIVY_VERSION="0.66.0"
+
+          curl -sfL \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
+            -o /tmp/trivy.tar.gz
+
+          tar -xzf /tmp/trivy.tar.gz -C /tmp
+
+          sudo install /tmp/trivy /usr/local/bin/trivy
+
+          trivy --version
+
+      # --------------------------------------------------------
+      # Trivy IaC
+      #
+      # IMPORTANT:
+      # Do NOT use --ignore-unfixed here.
+      # It is not supported by `trivy config`.
+      # --------------------------------------------------------
+      - name: Run Trivy IaC security scan
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "Trivy IaC Security Scan"
+          echo "=========================================="
+
+          trivy config . \
+            --severity HIGH,CRITICAL \
+            --exit-code 1 \
+            --skip-dirs .git \
+            --skip-dirs .terraform \
+            --skip-dirs node_modules
+
+      # --------------------------------------------------------
+      # Install Checkov
+      # --------------------------------------------------------
+      - name: Install Checkov
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          python3 -m pip install --upgrade pip
+          python3 -m pip install checkov
+
+          checkov --version
+
+      # --------------------------------------------------------
+      # Checkov
+      # --------------------------------------------------------
+      - name: Run Checkov Terraform security scan
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "Checkov Terraform Security Scan"
+          echo "=========================================="
+
+          checkov \
+            --directory "${TF_WORKING_DIR}" \
+            --framework terraform \
+            --output cli \
+            --soft-fail false
+
+      # --------------------------------------------------------
+      # Install Terraform
+      # --------------------------------------------------------
+      - name: Install Terraform
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TERRAFORM_VERSION="1.12.2"
+
+          curl -fsSL \
+            "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" \
+            -o /tmp/terraform.zip
+
+          sudo apt-get update
+          sudo apt-get install -y unzip
+
+          unzip -o /tmp/terraform.zip -d /tmp/terraform
+
+          sudo install /tmp/terraform/terraform /usr/local/bin/terraform
+
           terraform version
 
-      - name: Terraform Init
-        working-directory: ./terraform
+      # --------------------------------------------------------
+      # Terraform Format
+      # --------------------------------------------------------
+      - name: Terraform format check
+        shell: bash
+        working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           set -euo pipefail
 
-          echo "=========================================="
-          echo "Terraform Init"
-          echo "=========================================="
+          terraform fmt -check -recursive
 
-          terraform init
-
-      - name: Terraform Validate
-        working-directory: ./terraform
+      # --------------------------------------------------------
+      # Terraform Init
+      # --------------------------------------------------------
+      - name: Terraform init
+        shell: bash
+        working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           set -euo pipefail
 
-          echo "=========================================="
-          echo "Terraform Validate"
-          echo "=========================================="
+          terraform init \
+            -input=false \
+            -no-color
 
-          terraform validate
-
-      - name: Terraform Plan
-        working-directory: ./terraform
+      # --------------------------------------------------------
+      # Terraform Validate
+      # --------------------------------------------------------
+      - name: Terraform validate
+        shell: bash
+        working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           set -euo pipefail
 
-          echo "=========================================="
-          echo "Terraform Plan"
-          echo "=========================================="
+          terraform validate \
+            -no-color
 
-          terraform plan -out=tfplan.binary
+      # --------------------------------------------------------
+      # Terraform Plan
+      #
+      # This is intentionally a PLAN only.
+      # No infrastructure is changed here.
+      # --------------------------------------------------------
+      - name: Terraform plan
+        shell: bash
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        run: |
+          set -euo pipefail
 
+          terraform plan \
+            -input=false \
+            -out=tfplan.binary \
+            -no-color
+
+      # --------------------------------------------------------
+      # Terraform Plan JSON
+      # --------------------------------------------------------
       - name: Convert Terraform plan to JSON
-        working-directory: ./terraform
+        shell: bash
+        working-directory: ${{ env.TF_WORKING_DIR }}
         run: |
           set -euo pipefail
 
-          echo "=========================================="
-          echo "Terraform Plan JSON"
-          echo "=========================================="
-
-          terraform show -json tfplan.binary > tfplan.json
+          terraform show \
+            -json \
+            tfplan.binary > tfplan.json
 
           test -s tfplan.json
 
-          echo "Terraform plan JSON generated successfully."
-
-      # ==========================================================
-      # 5. OPA / REGO
-      # ==========================================================
-      - name: Setup OPA
-        uses: open-policy-agent/setup-opa@v2
-
-      - name: OPA version
+      # --------------------------------------------------------
+      # Install OPA
+      # --------------------------------------------------------
+      - name: Install OPA
         shell: bash
         run: |
           set -euo pipefail
+
+          OPA_VERSION="1.0.0"
+
+          curl -sSfL \
+            "https://openpolicyagent.org/downloads/v${OPA_VERSION}/opa_linux_amd64_static" \
+            -o /tmp/opa
+
+          chmod +x /tmp/opa
+
+          sudo install /tmp/opa /usr/local/bin/opa
+
           opa version
 
-      - name: Validate OPA policy files
+      # --------------------------------------------------------
+      # Validate OPA policy directory
+      # --------------------------------------------------------
+      - name: Validate OPA policies
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          POLICY="policies/opa/s3_kms_enforcement.rego"
+
+          if [ ! -f "$POLICY" ]; then
+            echo "ERROR: OPA policy not found:"
+            echo "$POLICY"
+            exit 1
+          fi
+
+          opa check "$POLICY"
+
+      # --------------------------------------------------------
+      # OPA Terraform security gate
+      # --------------------------------------------------------
+      - name: Run OPA Terraform security policy
         shell: bash
         run: |
           set -euo pipefail
 
           echo "=========================================="
-          echo "OPA Policy Validation"
+          echo "OPA Terraform Security Policy"
           echo "=========================================="
 
-          test -f policies/opa/s3_kms_enforcement.rego
+          RESULT="$(opa eval \
+            --format=json \
+            --input "${TF_WORKING_DIR}/tfplan.json" \
+            --data policies/opa/s3_kms_enforcement.rego \
+            'data.terraform.analysis.deny')"
 
-          opa check policies/opa/s3_kms_enforcement.rego
+          echo "$RESULT"
 
-      - name: Run OPA Terraform policy
-        working-directory: ./terraform
-        shell: bash
-        run: |
-          set -euo pipefail
+          DENY_COUNT="$(echo "$RESULT" | jq '[.result[]?.expressions[]?.value[]?] | length')"
 
-          echo "=========================================="
-          echo "OPA Terraform Policy"
-          echo "=========================================="
+          echo
+          echo "OPA deny count: ${DENY_COUNT}"
 
-          test -f tfplan.json
+          if [ "$DENY_COUNT" -gt 0 ]; then
+            echo
+            echo "=========================================="
+            echo "OPA SECURITY GATE FAILED"
+            echo "=========================================="
+            exit 1
+          fi
 
-          opa eval \
-            --fail \
-            --input tfplan.json \
-            --data ../policies/opa/s3_kms_enforcement.rego \
-            'data.terraform.analysis.deny'
+          echo
+          echo "OPA security policy passed."
 
-      # ==========================================================
-      # SECURITY GATE SUMMARY
-      # ==========================================================
-      - name: Security gate passed
-        shell: bash
-        run: |
-          echo ""
-          echo "=========================================="
-          echo "SECURITY GATE PASSED"
-          echo "=========================================="
-          echo ""
-          echo "Gitleaks       : PASSED"
-          echo "Trivy IaC      : PASSED"
-          echo "Checkov        : PASSED"
-          echo "Terraform      : PASSED"
-          echo "OPA/Rego       : PASSED"
-          echo ""
-          echo "Proceeding to Floci deployment."
-          echo ""
+      # --------------------------------------------------------
+      # Upload Terraform plan for troubleshooting/audit
+      # --------------------------------------------------------
+      - name: Upload Terraform security artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: terraform-security-artifacts
+          path: |
+            terraform/tfplan.json
+            terraform/tfplan.binary
+          if-no-files-found: ignore
+          retention-days: 7
 
 
   # ============================================================
-  # JOB 2: LOCAL DEPLOYMENT TO FLOCI
+  # STAGE 2 - LOCAL FLOCI DEPLOYMENT
   # ============================================================
   local-deployment:
-    name: Local Deployment to Floci
+    name: Local Floci Deployment
     runs-on: ubuntu-latest
+    needs: security-scans
 
+    services:
+      floci:
+        image: floci/floci:latest
+        ports:
+          - 4566:4566
+        options: >-
+          --health-cmd "curl -f http://localhost:4566/_localstack/health || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+
+      # --------------------------------------------------------
+      # Checkout
+      # --------------------------------------------------------
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # --------------------------------------------------------
+      # Install Terraform
+      # --------------------------------------------------------
+      - name: Install Terraform
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TERRAFORM_VERSION="1.12.2"
+
+          curl -fsSL \
+            "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" \
+            -o /tmp/terraform.zip
+
+          sudo apt-get update
+          sudo apt-get install -y unzip
+
+          unzip -o /tmp/terraform.zip -d /tmp/terraform
+
+          sudo install /tmp/terraform/terraform /usr/local/bin/terraform
+
+          terraform version
+
+      # --------------------------------------------------------
+      # Install Trivy
+      # --------------------------------------------------------
+      - name: Install Trivy
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          TRIVY_VERSION="0.66.0"
+
+          curl -sfL \
+            "https://github.com/aquasecurity/trivy/releases/download/v${TRIVY_VERSION}/trivy_${TRIVY_VERSION}_Linux-64bit.tar.gz" \
+            -o /tmp/trivy.tar.gz
+
+          tar -xzf /tmp/trivy.tar.gz -C /tmp
+
+          sudo install /tmp/trivy /usr/local/bin/trivy
+
+          trivy --version
+
+      # --------------------------------------------------------
+      # Verify Floci
+      # --------------------------------------------------------
+      - name: Verify Floci is available
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "Waiting for Floci..."
+
+          for i in {1..30}; do
+            if curl -sf http://localhost:4566/_localstack/health >/dev/null 2>&1; then
+              echo "Floci is available."
+              exit 0
+            fi
+
+            sleep 2
+          done
+
+          echo "ERROR: Floci did not become ready."
+          exit 1
+
+      # --------------------------------------------------------
+      # Terraform Init
+      # --------------------------------------------------------
+      - name: Terraform init
+        shell: bash
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        env:
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_DEFAULT_REGION: us-east-1
+
+          AWS_ENDPOINT_URL: http://localhost:4566
+          AWS_ENDPOINT_URL_S3: http://localhost:4566
+          AWS_ENDPOINT_URL_KMS: http://localhost:4566
+          AWS_ENDPOINT_URL_SECRETSMANAGER: http://localhost:4566
+          AWS_ENDPOINT_URL_IAM: http://localhost:4566
+          AWS_ENDPOINT_URL_STS: http://localhost:4566
+        run: |
+          set -euo pipefail
+
+          terraform init \
+            -input=false \
+            -no-color
+
+      # --------------------------------------------------------
+      # Terraform Plan Against Floci
+      # --------------------------------------------------------
+      - name: Terraform plan against Floci
+        shell: bash
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        env:
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_DEFAULT_REGION: us-east-1
+
+          AWS_ENDPOINT_URL: http://localhost:4566
+          AWS_ENDPOINT_URL_S3: http://localhost:4566
+          AWS_ENDPOINT_URL_KMS: http://localhost:4566
+          AWS_ENDPOINT_URL_SECRETSMANAGER: http://localhost:4566
+          AWS_ENDPOINT_URL_IAM: http://localhost:4566
+          AWS_ENDPOINT_URL_STS: http://localhost:4566
+        run: |
+          set -euo pipefail
+
+          terraform plan \
+            -input=false \
+            -out=tfplan-floci.binary \
+            -no-color
+
+      # --------------------------------------------------------
+      # Terraform Apply
+      #
+      # This happens ONLY after security-scans succeeds.
+      # --------------------------------------------------------
+      - name: Terraform apply to Floci
+        shell: bash
+        working-directory: ${{ env.TF_WORKING_DIR }}
+        env:
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_DEFAULT_REGION: us-east-1
+
+          AWS_ENDPOINT_URL: http://localhost:4566
+          AWS_ENDPOINT_URL_S3: http://localhost:4566
+          AWS_ENDPOINT_URL_KMS: http://localhost:4566
+          AWS_ENDPOINT_URL_SECRETSMANAGER: http://localhost:4566
+          AWS_ENDPOINT_URL_IAM: http://localhost:4566
+          AWS_ENDPOINT_URL_STS: http://localhost:4566
+        run: |
+          set -euo pipefail
+
+          terraform apply \
+            -input=false \
+            -auto-approve \
+            -no-color
+
+      # --------------------------------------------------------
+      # Container Security Scan
+      #
+      # IMPORTANT:
+      # --ignore-unfixed is valid for image vulnerability
+      # scanning, unlike `trivy config`.
+      # --------------------------------------------------------
+      - name: Run Trivy container vulnerability scan
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          echo "=========================================="
+          echo "Trivy Container Vulnerability Scan"
+          echo "=========================================="
+
+          docker pull "${FLOCI_IMAGE}"
+
+          trivy image \
+            --severity "${TRIVY_SEVERITY}" \
+            --ignore-unfixed \
+            --exit-code 1 \
+            "${FLOCI_IMAGE}"
+
+
+  # ============================================================
+  # STAGE 3 - ROLLBACK / CLEANUP
+  # ============================================================
+  rollback:
+    name: Rollback / Cleanup Floci
+    runs-on: ubuntu-latest
     needs:
-      - security-scans
+      - local-deployment
+    if: always()
 
     services:
       floci:
@@ -270,186 +563,67 @@ jobs:
 
     steps:
 
-      # ----------------------------------------------------------
-      # Checkout
-      # ----------------------------------------------------------
-      - name: Checkout code
+      - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      # ----------------------------------------------------------
-      # Environment
-      # ----------------------------------------------------------
-      - name: Check deployment environment
+      - name: Install Terraform
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "=========================================="
-          echo "Floci Deployment Environment"
-          echo "=========================================="
+          TERRAFORM_VERSION="1.12.2"
 
-          echo ""
-          echo "Docker:"
-          docker --version
+          curl -fsSL \
+            "https://releases.hashicorp.com/terraform/${TERRAFORM_VERSION}/terraform_${TERRAFORM_VERSION}_linux_amd64.zip" \
+            -o /tmp/terraform.zip
 
-      # ----------------------------------------------------------
-      # Wait for Floci
-      # ----------------------------------------------------------
-      - name: Wait for Floci
-        shell: bash
-        run: |
-          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y unzip
 
-          echo "=========================================="
-          echo "Waiting for Floci"
-          echo "=========================================="
+          unzip -o /tmp/terraform.zip -d /tmp/terraform
 
-          for i in {1..30}; do
+          sudo install /tmp/terraform/terraform /usr/local/bin/terraform
 
-            if curl --fail --silent --show-error \
-              http://127.0.0.1:4566/_localstack/health \
-              > /dev/null 2>&1; then
-
-              echo "Floci is ready."
-              exit 0
-
-            fi
-
-            echo "Waiting for Floci... attempt ${i}/30"
-            sleep 2
-
-          done
-
-          echo "Floci did not become ready."
-
-          docker ps -a
-
-          exit 1
-
-      # ----------------------------------------------------------
-      # Verify Floci endpoint
-      # ----------------------------------------------------------
-      - name: Check Floci endpoint
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          echo "=========================================="
-          echo "Floci Endpoint"
-          echo "=========================================="
-
-          curl \
-            --fail \
-            --silent \
-            --show-error \
-            http://127.0.0.1:4566/ \
-            || true
-
-      # ----------------------------------------------------------
-      # Terraform
-      # ----------------------------------------------------------
-      - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
-
-      - name: Terraform version
-        shell: bash
-        run: |
-          set -euo pipefail
           terraform version
 
-      # ----------------------------------------------------------
-      # Terraform Init
-      # ----------------------------------------------------------
-      - name: Terraform Init
-        working-directory: ./terraform
+      - name: Rollback / destroy Floci infrastructure
+        if: needs.local-deployment.result == 'success'
+        shell: bash
+        working-directory: ${{ env.TF_WORKING_DIR }}
         env:
-          AWS_ENDPOINT_URL_S3: http://127.0.0.1:4566
-          AWS_ENDPOINT_URL_KMS: http://127.0.0.1:4566
-          AWS_ENDPOINT_URL_SECRETSMANAGER: http://127.0.0.1:4566
-          AWS_ENDPOINT_URL_IAM: http://127.0.0.1:4566
-          AWS_ENDPOINT_URL_STS: http://127.0.0.1:4566
+          AWS_ACCESS_KEY_ID: test
+          AWS_SECRET_ACCESS_KEY: test
+          AWS_DEFAULT_REGION: us-east-1
+
+          AWS_ENDPOINT_URL: http://localhost:4566
+          AWS_ENDPOINT_URL_S3: http://localhost:4566
+          AWS_ENDPOINT_URL_KMS: http://localhost:4566
+          AWS_ENDPOINT_URL_SECRETSMANAGER: http://localhost:4566
+          AWS_ENDPOINT_URL_IAM: http://localhost:4566
+          AWS_ENDPOINT_URL_STS: http://localhost:4566
         run: |
           set -euo pipefail
 
           echo "=========================================="
-          echo "Terraform Init - Floci"
+          echo "Rollback / Cleanup"
           echo "=========================================="
 
-          terraform init
+          terraform init \
+            -input=false \
+            -no-color
 
-      # ----------------------------------------------------------
-      # Terraform Validate
-      # ----------------------------------------------------------
-      - name: Terraform Validate
-        working-directory: ./terraform
-        env:
-          AWS_ENDPOINT_URL_S3: http://127.0.0.1:4566
-          AWS_ENDPOINT_URL_KMS: http://127.0.0.1:4566
-          AWS_ENDPOINT_URL_SECRETSMANAGER: http://127.0.0.1:4566
-          AWS_ENDPOINT_URL_IAM: http://127.0.0.1:4566
-          AWS_ENDPOINT_URL_STS: http://127.0.0.1:4566
-        run: |
-          set -euo pipefail
+          terraform destroy \
+            -input=false \
+            -auto-approve \
+            -no-color
 
-          echo "=========================================="
-          echo "Terraform Validate - Floci"
-          echo "=========================================="
+          echo "Floci infrastructure cleanup completed."
 
-          terraform validate
-
-      # ----------------------------------------------------------
-      # Terraform Apply
-      # ----------------------------------------------------------
-      - name: Terraform Apply
-        working-directory: ./terraform
-        env:
-          AWS_ENDPOINT_URL_S3: http://127.0.0.1:4566
-          AWS_ENDPOINT_URL_KMS: http://127.0.0.1:4566
-          AWS_ENDPOINT_URL_SECRETSMANAGER: http://127.0.0.1:4566
-          AWS_ENDPOINT_URL_IAM: http://127.0.0.1:4566
-          AWS_ENDPOINT_URL_STS: http://127.0.0.1:4566
-        run: |
-          set -euo pipefail
-
-          echo "=========================================="
-          echo "Terraform Apply - Floci"
-          echo "=========================================="
-
-          terraform apply -auto-approve
-
-      # ----------------------------------------------------------
-      # Deployment verification
-      # ----------------------------------------------------------
-      - name: Verify Terraform state
-        working-directory: ./terraform
-        env:
-          AWS_ENDPOINT_URL_S3: http://127.0.0.1:4566
-          AWS_ENDPOINT_URL_KMS: http://127.0.0.1:4566
-          AWS_ENDPOINT_URL_SECRETSMANAGER: http://127.0.0.1:4566
-          AWS_ENDPOINT_URL_IAM: http://127.0.0.1:4566
-          AWS_ENDPOINT_URL_STS: http://127.0.0.1:4566
-        run: |
-          set -euo pipefail
-
-          echo "=========================================="
-          echo "Terraform State"
-          echo "=========================================="
-
-          terraform state list || true
-
-      # ----------------------------------------------------------
-      # Deployment success
-      # ----------------------------------------------------------
-      - name: Deployment passed
+      - name: Rollback status
+        if: always()
         shell: bash
         run: |
-          echo ""
-          echo "=========================================="
-          echo "FLOCI DEPLOYMENT PASSED"
-          echo "=========================================="
-          echo ""
-          echo "Security scans : PASSED"
-          echo "Terraform      : PASSED"
-          echo "Floci          : READY"
-          echo "Terraform Apply: PASSED"
-          echo ""
+          echo "Security scan result: ${{ needs.local-deployment.result }}"
+          echo "Rollback job completed."

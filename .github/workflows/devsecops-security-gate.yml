@@ -36,10 +36,14 @@ env:
 
 
 # ============================================================
-# SECURITY SCANS
+# JOBS
 # ============================================================
 
 jobs:
+
+  # ============================================================
+  # SECURITY SCANS
+  # ============================================================
 
   security-scans:
 
@@ -49,7 +53,7 @@ jobs:
     steps:
 
       # ========================================================
-      # CHECKOUT REPOSITORY - FULL HISTORY
+      # CHECKOUT REPOSITORY
       # ========================================================
 
       - name: Checkout repository
@@ -65,13 +69,15 @@ jobs:
 
           git init .
 
+          git config user.name "github-actions"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git remote add origin \
-            "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
           echo "Fetching complete repository history..."
 
-          git -c http.extraheader="AUTHORIZATION: bearer ${GH_TOKEN}" \
-            fetch \
+          git fetch \
             --no-tags \
             --prune \
             origin \
@@ -80,7 +86,9 @@ jobs:
           echo "Checking out commit:"
           echo "${GITHUB_SHA}"
 
-          git checkout --force "${GITHUB_SHA}"
+          git checkout \
+            --force \
+            "${GITHUB_SHA}"
 
           echo ""
           echo "Repository checkout completed."
@@ -305,8 +313,6 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Validating Terraform..."
-
           terraform validate
 
 
@@ -330,8 +336,6 @@ jobs:
             -json \
             tfplan.binary \
             > tfplan.json
-
-          echo "Terraform plan generated."
 
 
       # ========================================================
@@ -414,8 +418,6 @@ jobs:
             --tag sample-app:latest \
             ./app
 
-          echo ""
-          echo "Built image:"
           docker images sample-app
 
 
@@ -472,19 +474,23 @@ jobs:
 
           git init .
 
+          git config user.name "github-actions"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git remote add origin \
-            "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
+            "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
 
           echo "Fetching repository commit..."
 
-          git -c http.extraheader="AUTHORIZATION: bearer ${GH_TOKEN}" \
-            fetch \
+          git fetch \
             --no-tags \
             --prune \
             origin \
             "${GITHUB_SHA}"
 
-          git checkout --force "${GITHUB_SHA}"
+          git checkout \
+            --force \
+            "${GITHUB_SHA}"
 
           echo ""
           echo "Repository checkout completed."
@@ -502,10 +508,6 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
-          echo "=========================================="
-          echo "Docker"
-          echo "=========================================="
 
           docker version
 
@@ -526,13 +528,11 @@ jobs:
           echo "Floci Image"
           echo "=========================================="
 
-          echo "Image:"
           echo "${FLOCI_IMAGE}"
-
-          echo ""
 
           for attempt in 1 2 3 4 5; do
 
+            echo ""
             echo "Pull attempt ${attempt}/5..."
 
             if docker pull "${FLOCI_IMAGE}"; then
@@ -555,9 +555,6 @@ jobs:
           echo ""
           echo "ERROR: Unable to pull Floci image."
 
-          echo ""
-          echo "Docker information:"
-
           docker info
 
           exit 1
@@ -572,13 +569,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "=========================================="
-          echo "Starting Floci"
-          echo "=========================================="
+          echo "Removing previous Floci container if present..."
 
           docker rm \
             --force \
             floci 2>/dev/null || true
+
+          echo "Starting Floci..."
 
           docker run \
             --detach \

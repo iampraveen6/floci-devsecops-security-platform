@@ -24,15 +24,14 @@ permissions:
 
 env:
   TF_IN_AUTOMATION: "true"
+
   AWS_DEFAULT_REGION: us-east-1
   AWS_REGION: us-east-1
 
-  # Security tool versions
   GITLEAKS_VERSION: "8.24.2"
   TRIVY_VERSION: "0.70.0"
   OPA_VERSION: "1.17.0"
 
-  # Floci image pinned by digest
   FLOCI_IMAGE: "floci/floci@sha256:d2ecc8035822b23b8587a56eab15edd825f41d3fb80d93e8e66680410beddc08"
 
 
@@ -50,7 +49,7 @@ jobs:
     steps:
 
       # ========================================================
-      # CHECKOUT
+      # CHECKOUT REPOSITORY - FULL HISTORY
       # ========================================================
 
       - name: Checkout repository
@@ -60,27 +59,47 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Initializing repository..."
+          echo "=========================================="
+          echo "Initializing repository"
+          echo "=========================================="
 
           git init .
 
           git remote add origin \
             "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
 
+          echo "Fetching complete repository history..."
+
           git -c http.extraheader="AUTHORIZATION: bearer ${GH_TOKEN}" \
             fetch \
             --no-tags \
             --prune \
-            --depth=0 \
             origin \
-            "${GITHUB_SHA}"
+            "+refs/heads/*:refs/remotes/origin/*"
+
+          echo "Checking out commit:"
+          echo "${GITHUB_SHA}"
 
           git checkout --force "${GITHUB_SHA}"
 
+          echo ""
           echo "Repository checkout completed."
 
+          echo ""
+          echo "Current commit:"
+          git rev-parse HEAD
+
+          echo ""
+          echo "Git history:"
+          git rev-list --count HEAD
+
+          echo ""
+          echo "Repository contents:"
+          ls -la
+
+
       # ========================================================
-      # ENVIRONMENT
+      # ENVIRONMENT CHECK
       # ========================================================
 
       - name: Check environment
@@ -89,9 +108,11 @@ jobs:
           set -euo pipefail
 
           echo "=========================================="
-          echo "Runner Information"
+          echo "Environment"
           echo "=========================================="
 
+          echo ""
+          echo "Runner:"
           uname -a
 
           echo ""
@@ -114,8 +135,9 @@ jobs:
           echo "Pip:"
           python3 -m pip --version
 
+
       # ========================================================
-      # GITLEAKS
+      # GITLEAKS INSTALL
       # ========================================================
 
       - name: Install Gitleaks
@@ -139,23 +161,31 @@ jobs:
             /tmp/gitleaks \
             /usr/local/bin/gitleaks
 
-          echo "Installed Gitleaks:"
+          echo ""
+          echo "Gitleaks version:"
           gitleaks version
+
+
+      # ========================================================
+      # GITLEAKS SECRET SCAN
+      # ========================================================
 
       - name: Run Gitleaks secret detection
         shell: bash
         run: |
           set -euo pipefail
 
-          echo "Running Gitleaks..."
+          echo "=========================================="
+          echo "Gitleaks Secret Detection"
+          echo "=========================================="
 
-          gitleaks detect \
-            --source . \
+          gitleaks git \
             --redact \
             --verbose
 
+
       # ========================================================
-      # TRIVY
+      # TRIVY INSTALL
       # ========================================================
 
       - name: Install Trivy
@@ -179,8 +209,10 @@ jobs:
             /tmp/trivy \
             /usr/local/bin/trivy
 
-          echo "Installed Trivy:"
+          echo ""
+          echo "Trivy version:"
           trivy --version
+
 
       # ========================================================
       # TRIVY IaC SCAN
@@ -191,7 +223,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Running Trivy IaC security scan..."
+          echo "=========================================="
+          echo "Trivy IaC Security Scan"
+          echo "=========================================="
 
           trivy config \
             --severity HIGH,CRITICAL \
@@ -200,8 +234,9 @@ jobs:
             --format table \
             .
 
+
       # ========================================================
-      # CHECKOV
+      # CHECKOV INSTALL
       # ========================================================
 
       - name: Install Checkov
@@ -219,8 +254,10 @@ jobs:
             --upgrade \
             checkov
 
-          echo "Installed Checkov:"
+          echo ""
+          echo "Checkov version:"
           checkov --version
+
 
       # ========================================================
       # CHECKOV TERRAFORM SCAN
@@ -231,13 +268,16 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Running Checkov..."
+          echo "=========================================="
+          echo "Checkov Terraform Security Scan"
+          echo "=========================================="
 
           checkov \
             --directory ./terraform \
             --framework terraform \
             --output cli \
             --soft-fail false
+
 
       # ========================================================
       # TERRAFORM INIT
@@ -249,8 +289,11 @@ jobs:
         run: |
           set -euo pipefail
 
+          echo "Initializing Terraform..."
+
           terraform init \
             -input=false
+
 
       # ========================================================
       # TERRAFORM VALIDATE
@@ -262,7 +305,10 @@ jobs:
         run: |
           set -euo pipefail
 
+          echo "Validating Terraform..."
+
           terraform validate
+
 
       # ========================================================
       # TERRAFORM PLAN
@@ -274,6 +320,8 @@ jobs:
         run: |
           set -euo pipefail
 
+          echo "Creating Terraform plan..."
+
           terraform plan \
             -input=false \
             -out=tfplan.binary
@@ -283,10 +331,11 @@ jobs:
             tfplan.binary \
             > tfplan.json
 
-          echo "Terraform plan generated successfully."
+          echo "Terraform plan generated."
+
 
       # ========================================================
-      # OPA
+      # OPA INSTALL
       # ========================================================
 
       - name: Install OPA
@@ -306,11 +355,13 @@ jobs:
             /tmp/opa \
             /usr/local/bin/opa
 
-          echo "Installed OPA:"
+          echo ""
+          echo "OPA version:"
           opa version
 
+
       # ========================================================
-      # OPA POLICY SYNTAX VALIDATION
+      # OPA POLICY VALIDATION
       # ========================================================
 
       - name: Validate OPA policies
@@ -318,10 +369,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Validating Rego policies..."
+          echo "=========================================="
+          echo "OPA Policy Validation"
+          echo "=========================================="
 
           opa check \
             policies/opa
+
 
       # ========================================================
       # OPA TERRAFORM POLICY
@@ -332,13 +386,16 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Running OPA Terraform policy..."
+          echo "=========================================="
+          echo "OPA Terraform Policy"
+          echo "=========================================="
 
           opa eval \
             --fail \
             --input terraform/tfplan.json \
             --data policies/opa/s3_kms_enforcement.rego \
             'data.terraform.analysis.deny'
+
 
       # ========================================================
       # DOCKER BUILD
@@ -349,14 +406,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Building sample application..."
+          echo "=========================================="
+          echo "Docker Build"
+          echo "=========================================="
 
           docker build \
             --tag sample-app:latest \
             ./app
 
-          echo "Docker image created:"
+          echo ""
+          echo "Built image:"
           docker images sample-app
+
 
       # ========================================================
       # TRIVY CONTAINER SCAN
@@ -367,7 +428,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Running Trivy container scan..."
+          echo "=========================================="
+          echo "Trivy Container Security Scan"
+          echo "=========================================="
 
           trivy image \
             --severity HIGH,CRITICAL \
@@ -377,9 +440,9 @@ jobs:
             sample-app:latest
 
 
-# ============================================================
-# LOCAL DEPLOYMENT TO FLOCI
-# ============================================================
+  # ============================================================
+  # LOCAL DEPLOYMENT TO FLOCI
+  # ============================================================
 
   local-deployment:
 
@@ -393,7 +456,7 @@ jobs:
     steps:
 
       # ========================================================
-      # CHECKOUT
+      # CHECKOUT REPOSITORY
       # ========================================================
 
       - name: Checkout repository
@@ -403,24 +466,33 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Initializing repository..."
+          echo "=========================================="
+          echo "Initializing repository"
+          echo "=========================================="
 
           git init .
 
           git remote add origin \
             "${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}.git"
 
+          echo "Fetching repository commit..."
+
           git -c http.extraheader="AUTHORIZATION: bearer ${GH_TOKEN}" \
             fetch \
             --no-tags \
             --prune \
-            --depth=0 \
             origin \
             "${GITHUB_SHA}"
 
           git checkout --force "${GITHUB_SHA}"
 
+          echo ""
           echo "Repository checkout completed."
+
+          echo ""
+          echo "Current commit:"
+          git rev-parse HEAD
+
 
       # ========================================================
       # DOCKER CHECK
@@ -431,8 +503,15 @@ jobs:
         run: |
           set -euo pipefail
 
+          echo "=========================================="
+          echo "Docker"
+          echo "=========================================="
+
           docker version
+
+          echo ""
           docker info
+
 
       # ========================================================
       # FLOCI IMAGE PULL
@@ -447,15 +526,14 @@ jobs:
           echo "Floci Image"
           echo "=========================================="
 
+          echo "Image:"
           echo "${FLOCI_IMAGE}"
 
           echo ""
-          echo "Pulling Floci..."
 
           for attempt in 1 2 3 4 5; do
 
-            echo ""
-            echo "Pull attempt ${attempt}/5"
+            echo "Pull attempt ${attempt}/5..."
 
             if docker pull "${FLOCI_IMAGE}"; then
 
@@ -477,9 +555,13 @@ jobs:
           echo ""
           echo "ERROR: Unable to pull Floci image."
 
+          echo ""
+          echo "Docker information:"
+
           docker info
 
           exit 1
+
 
       # ========================================================
       # START FLOCI
@@ -490,13 +572,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Removing previous Floci container if present..."
+          echo "=========================================="
+          echo "Starting Floci"
+          echo "=========================================="
 
           docker rm \
             --force \
             floci 2>/dev/null || true
-
-          echo "Starting Floci..."
 
           docker run \
             --detach \
@@ -504,7 +586,9 @@ jobs:
             --publish 4566:4566 \
             "${FLOCI_IMAGE}"
 
+          echo ""
           echo "Floci container started."
+
 
       # ========================================================
       # FLOCI STATUS
@@ -528,6 +612,7 @@ jobs:
 
           docker logs floci || true
 
+
       # ========================================================
       # FLOCI READINESS
       # ========================================================
@@ -537,11 +622,13 @@ jobs:
         run: |
           set -euo pipefail
 
-          echo "Waiting for Floci on port 4566..."
+          echo "=========================================="
+          echo "Waiting for Floci"
+          echo "=========================================="
 
           for attempt in {1..30}; do
 
-            echo "Health check attempt ${attempt}/30"
+            echo "Health check attempt ${attempt}/30..."
 
             if curl \
               --silent \
@@ -569,13 +656,16 @@ jobs:
 
           echo ""
           echo "Container status:"
+
           docker ps -a
 
           echo ""
           echo "Floci logs:"
+
           docker logs floci || true
 
           exit 1
+
 
       # ========================================================
       # TERRAFORM VERSION
@@ -587,6 +677,7 @@ jobs:
           set -euo pipefail
 
           terraform version
+
 
       # ========================================================
       # TERRAFORM INIT
@@ -604,8 +695,11 @@ jobs:
         run: |
           set -euo pipefail
 
+          echo "Initializing Terraform against Floci..."
+
           terraform init \
             -input=false
+
 
       # ========================================================
       # TERRAFORM VALIDATE
@@ -618,6 +712,7 @@ jobs:
           set -euo pipefail
 
           terraform validate
+
 
       # ========================================================
       # TERRAFORM APPLY
@@ -635,14 +730,18 @@ jobs:
         run: |
           set -euo pipefail
 
+          echo "=========================================="
+          echo "Terraform Apply"
+          echo "=========================================="
+
           terraform apply \
             -input=false \
             -auto-approve
 
 
-# ============================================================
-# FAILURE NOTIFICATION
-# ============================================================
+  # ============================================================
+  # FAILURE NOTIFICATION
+  # ============================================================
 
   notify-on-failure:
 

@@ -1,44 +1,48 @@
-# OPA/Rego Policy: Enforce KMS Encryption on S3 Buckets
-
 package terraform.analysis
 
-# Deny if an S3 bucket does not have server-side encryption configured with KMS.
-deny[msg] if {
-    # Find all S3 bucket resources
-    resource := input.resource.aws_s3_bucket[_]
+import rego.v1
 
-    # Check if a server-side encryption configuration is missing
-    not resource.server_side_encryption_configuration
+# Deny if an S3 bucket does not have server-side encryption configured.
+deny contains msg if {
+    some resource in input.resource_changes
+    resource.type == "aws_s3_bucket"
+    resource.change.actions[_] != "delete"
 
-    # Format the denial message
-    msg := sprintf("S3 bucket '%s' must have server-side encryption (SSE) with KMS enabled.", [resource.name])
+    # Check if server-side encryption configuration is missing or null
+    not resource.change.after.server_side_encryption_configuration
+
+    msg := sprintf("S3 bucket '%s' must have server-side encryption (SSE) configured.", [resource.address])
 }
 
-# Deny if the server-side encryption configuration does not use 'aws:kms'.
-deny[msg] if {
-    # Find all S3 bucket resources with SSE configuration
-    resource := input.resource.aws_s3_bucket[_]
-    sse_config := resource.server_side_encryption_configuration[_]
+# Deny if server-side encryption does not use 'aws:kms'.
+deny contains msg if {
+    some resource in input.resource_changes
+    resource.type == "aws_s3_bucket"
+    resource.change.actions[_] != "delete"
 
-    # Check if the algorithm is not 'aws:kms'
-    sse_config.rule[_].apply_server_side_encryption_by_default[_].sse_algorithm != "aws:kms"
+    some sse_config in resource.change.after.server_side_encryption_configuration
+    some rule in sse_config.rule
+    some default_encryption in rule.apply_server_side_encryption_by_default
 
-    # Format the denial message
-    msg := sprintf("S3 bucket '%s' is not using 'aws:kms' for server-side encryption.", [resource.name])
+    default_encryption.sse_algorithm != "aws:kms"
+
+    msg := sprintf("S3 bucket '%s' is not using 'aws:kms' for server-side encryption (found '%s').", [resource.address, default_encryption.sse_algorithm])
 }
 
-# Deny if the KMS key ID is missing from the encryption configuration.
-deny[msg] if {
-    # Find all S3 bucket resources with SSE configuration
-    resource := input.resource.aws_s3_bucket[_]
-    sse_config := resource.server_side_encryption_configuration[_]
+# Deny if the KMS master key ID is missing when using 'aws:kms'.
+deny contains msg if {
+    some resource in input.resource_changes
+    resource.type == "aws_s3_bucket"
+    resource.change.actions[_] != "delete"
 
-    # Find a rule that uses 'aws:kms' but does not have a kms_master_key_id
-    rule := sse_config.rule[_]
-    apply_default := rule.apply_server_side_encryption_by_default[i]
-    apply_default.sse_algorithm == "aws:kms"
-    not object.get(apply_default, "kms_master_key_id", false)
+    some sse_config in resource.change.after.server_side_encryption_configuration
+    some rule in sse_config.rule
+    some default_encryption in rule.apply_server_side_encryption_by_default
 
-    # Format the denial message
-    msg := sprintf("S3 bucket '%s' must specify a 'kms_master_key_id' for SSE.", [resource.name])
+    default_encryption.sse_algorithm == "aws:kms"
+    
+    # Ensure kms_master_key_id is either missing or empty
+    not default_encryption.kms_master_key_id
+
+    msg := sprintf("S3 bucket '%s' must specify a 'kms_master_key_id' when using 'aws:kms'.", [resource.address])
 }

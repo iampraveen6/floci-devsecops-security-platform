@@ -124,9 +124,35 @@ Ensure the following tools are installed on your system (WSL is recommended on W
     =================================================
     ```
 
+## Floci Web UI
+
+When you start Floci with the Docker socket mounted, it exposes a local web dashboard at:
+
+```text
+http://localhost:4566/
+```
+
+The dashboard lets you browse the locally emulated AWS services (S3, KMS, IAM, Secrets Manager, and more) and inspect the resources deployed by Terraform. It is a convenient way to visually verify the local infrastructure before or after running the audit script.
+
+To access it:
+
+1. Start the Floci container using the command from the [Local Development & Audit](#local-development--audit) section (which already mounts `/var/run/docker.sock`).
+2. Open `http://localhost:4566/` in your browser.
+3. Navigate through the service list to view buckets, KMS keys, IAM policies, and secrets.
+
 ## Sample Application
 
 A minimal containerized Flask application is provided in `app/`. It exposes a `/health` endpoint and is built and scanned by the Trivy container vulnerability scan in the CI pipeline.
+
+### Application Details
+
+- **Language/Framework**: Python 3 with Flask.
+- **Endpoint**: `GET /health` returns a JSON health-check response.
+- **Files**:
+  - `app/main.py` — Flask application entry point.
+  - `app/requirements.txt` — Python dependencies (Flask, Gunicorn).
+  - `app/Dockerfile` — container build based on `python:3.13-slim` and runs as a non-root user.
+- **CI integration**: The `DevSecOps Security Gate` workflow builds the Docker image and runs a Trivy container vulnerability scan to demonstrate supply-chain security.
 
 ### Prerequisites
 
